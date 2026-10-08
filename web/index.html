@@ -91,11 +91,7 @@
   <div v-if="modal" class="modal-mask" @click.self="closeModal">
     <form class="modal" @submit.prevent="submitModal" role="dialog" aria-modal="true" :aria-label="modalTitle">
       <div class="modal-head"><h3>{{ modalTitle }}</h3><button class="icon-close" type="button" @click="closeModal" aria-label="关闭">×</button></div>
-      <template v-if="modal==='unlock'">
-        <label class="field-label" for="edit-pass">编辑密码</label>
-        <input id="edit-pass" ref="modalInput" v-model="editPassword" type="password" autocomplete="current-password" placeholder="再次输入密码" required>
-      </template>
-      <template v-else-if="modal==='category'">
+      <template v-if="modal==='category'">
         <label class="field-label" for="category-name">分类名称</label>
         <input id="category-name" ref="modalInput" v-model.trim="form.name" maxlength="40" placeholder="例如：常用工具" required>
       </template>
@@ -113,7 +109,7 @@
         <button v-if="(modal==='link'||modal==='category') && form.id" class="danger-link" type="button" @click="deleteItem">删除</button>
         <div class="modal-spacer"></div>
         <button type="button" class="secondary" @click="closeModal">取消</button>
-        <button class="primary" type="submit" :disabled="busy">{{ busy ? '请稍候…' : (modal==='unlock' ? '解锁编辑' : '保存') }}</button>
+        <button class="primary" type="submit" :disabled="busy">{{ busy ? '请稍候…' : '保存' }}</button>
       </div>
     </form>
   </div>

@@ -40,6 +40,9 @@ func TestPageAuthEditAndPersistence(t *testing.T) {
 	if send("/api/data", "GET", nil, nil).Code != 401 {
 		t.Fatal("anonymous access")
 	}
+	if r := send("/api/data", "PUT", map[string]any{}, nil); r.Code != 401 {
+		t.Fatalf("anonymous write was not rejected: %d %s", r.Code, r.Body.String())
+	}
 	login := send("/api/login", "POST", map[string]any{"password": "long-private-password"}, nil)
 	if login.Code != 200 {
 		t.Fatal(login.Body.String())
@@ -58,24 +61,12 @@ func TestPageAuthEditAndPersistence(t *testing.T) {
 	}
 	data.Categories[0].Name = "Changed"
 	saveReq := map[string]any{"revision": data.Revision, "categories": data.Categories}
-	if send("/api/data", "PUT", saveReq, cookie).Code != 403 {
-		t.Fatal("edit lock bypass")
-	}
-	if send("/api/edit/unlock", "POST", map[string]any{"password": "long-private-password"}, cookie).Code != 200 {
-		t.Fatal("unlock failed")
-	}
 	save := send("/api/data", "PUT", saveReq, cookie)
 	if save.Code != 200 {
-		t.Fatal(save.Body.String())
+		t.Fatalf("authenticated save failed without a second password: %d %s", save.Code, save.Body.String())
 	}
 	if send("/api/data", "PUT", saveReq, cookie).Code != 409 {
 		t.Fatal("revision conflict not detected")
-	}
-	if send("/api/edit/lock", "POST", map[string]any{}, cookie).Code != 200 {
-		t.Fatal("edit lock failed")
-	}
-	if send("/api/data", "PUT", saveReq, cookie).Code != 403 {
-		t.Fatal("edit lock bypass after re-lock")
 	}
 	if send("/api/logout", "POST", map[string]any{}, cookie).Code != 200 {
 		t.Fatal("logout failed")
@@ -117,9 +108,6 @@ func TestBackgroundUploadServeAndClear(t *testing.T) {
 		t.Fatal(login.Body.String())
 	}
 	cookie := login.Result().Cookies()[0]
-	if r := sendJSON("/api/edit/unlock", "POST", map[string]any{"password": "long-private-password"}, cookie); r.Code != 200 {
-		t.Fatal(r.Body.String())
-	}
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 	part, err := writer.CreateFormFile("background", "bg.png")
@@ -271,9 +259,6 @@ func TestAPIServerRejectsDuplicateSave(t *testing.T) {
 		t.Fatal(login.Body.String())
 	}
 	cookie := login.Result().Cookies()[0]
-	if r := send("/api/edit/unlock", "POST", map[string]any{"password": "test-very-private-password"}, cookie); r.Code != 200 {
-		t.Fatal(r.Body.String())
-	}
 	out := send("/api/data", "GET", nil, cookie)
 	var data struct {
 		Revision   string     `json:"revision"`

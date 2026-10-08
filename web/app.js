@@ -61,7 +61,7 @@
     data() {
       return {
         loading: true, loggedIn: false, editing: false, busy: false,
-        password: '', editPassword: '', error: '', modalError: '',
+        password: '', error: '', modalError: '',
         categories: [], backgroundImage: '', revision: '', search: '',
         modal: '', form: { id: '', catId: '', name: '', url: '', icon: '', description: '' },
         toast: ''
@@ -94,7 +94,6 @@
         return null;
       },
       modalTitle() {
-        if (this.modal === 'unlock') return '解锁编辑';
         if (this.modal === 'category') return this.form.id ? '编辑分类' : '新建分类';
         if (this.modal === 'link') return this.form.id ? '编辑网址' : '添加网址';
         return '';
@@ -105,7 +104,6 @@
       try {
         const s = await request('/api/me');
         this.loggedIn = s.loggedIn;
-        this.editing = s.editing;
         if (s.loggedIn) await this.loadData();
       } catch (e) { this.notify(e.message); }
       this.loading = false;
@@ -145,13 +143,11 @@
           this.clearPointer();
           try {
             await saveQueue;
-            await request('/api/edit/lock', 'POST', {});
             this.editing = false;
-            this.notify('编辑已锁定');
+            this.notify('编辑已完成');
           } catch (e) { this.notify(e.message); }
         } else {
-          this.modal = 'unlock'; this.editPassword = ''; this.modalError = '';
-          this.focusModal();
+          this.editing = true;
         }
       },
       closeModal() { if (this.busy) return; this.modal = ''; this.modalError = ''; },
@@ -171,15 +167,6 @@
       async submitModal() {
         if (this.busy) return;
         this.modalError = '';
-        if (this.modal === 'unlock') {
-          this.busy = true;
-          try {
-            await request('/api/edit/unlock', 'POST', { password: this.editPassword });
-            this.editing = true; this.editPassword = ''; this.modal = '';
-          } catch (e) { this.modalError = e.message; }
-          finally { this.busy = false; }
-          return;
-        }
         const form = clone(this.form);
         if (!form.name.trim()) { this.modalError = '请输入名称'; return; }
         if (this.modal === 'category') {
@@ -236,10 +223,6 @@
         saveQueue = task.catch(() => {});
         return task.catch(async (e) => {
           if (e.status === 401) { this.loggedIn = false; this.editing = false; }
-          if (e.status === 403) {
-            this.editing = false;
-            try { await this.loadData(); } catch (_) { /* keep state to inspect */ }
-          }
           if (e.status === 409) {
             await saveQueue;
             try { await this.loadData(); } catch (_) { /* keep previous state */ }

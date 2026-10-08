@@ -49,8 +49,7 @@ type SaveRequest struct {
 	Categories      []Category `json:"categories"`
 }
 type Session struct {
-	Expires   time.Time
-	EditUntil time.Time
+	Expires time.Time
 }
 type Limit struct {
 	Count int
@@ -68,7 +67,6 @@ type App struct {
 
 const (
 	sessionTTL    = 7 * 24 * time.Hour
-	editTTL       = 15 * time.Minute
 	attemptWindow = 15 * time.Minute
 	maxAttempts   = 10
 )
@@ -159,9 +157,8 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 	if method == "GET" && path == "/api/me" {
 		a.mu.Lock()
 		s := a.session(r)
-		editing := s != nil && time.Now().Before(s.EditUntil)
 		a.mu.Unlock()
-		writeJSON(w, 200, map[string]any{"loggedIn": s != nil, "editing": editing})
+		writeJSON(w, 200, map[string]any{"loggedIn": s != nil})
 		return
 	}
 	if method == "POST" {
@@ -231,37 +228,6 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"ok": true})
 		return
 	}
-	if method == "POST" && path == "/api/edit/unlock" {
-		if a.checkAttempt(r) {
-			writeJSON(w, 429, map[string]any{"error": "尝试次数过多，15 分钟后重试"})
-			return
-		}
-		var input struct {
-			Password string `json:"password"`
-		}
-		if err := readJSON(r, &input); err != nil {
-			writeJSON(w, 400, map[string]any{"error": err.Error()})
-			return
-		}
-		if !a.verify(input.Password) {
-			a.failAttempt(r)
-			writeJSON(w, 401, map[string]any{"error": "密码错误"})
-			return
-		}
-		a.resetAttempt(r)
-		a.mu.Lock()
-		s.EditUntil = time.Now().Add(editTTL)
-		a.mu.Unlock()
-		writeJSON(w, 200, map[string]any{"ok": true})
-		return
-	}
-	if method == "POST" && path == "/api/edit/lock" {
-		a.mu.Lock()
-		s.EditUntil = time.Time{}
-		a.mu.Unlock()
-		writeJSON(w, 200, map[string]any{"ok": true})
-		return
-	}
 	if method == "GET" && path == "/api/data" {
 		a.mu.Lock()
 		data, rev, err := a.load()
@@ -274,13 +240,6 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if method == "POST" && path == "/api/background" {
-		a.mu.Lock()
-		allowed := time.Now().Before(s.EditUntil)
-		a.mu.Unlock()
-		if !allowed {
-			writeJSON(w, 403, map[string]any{"error": "编辑已锁定，请重新解锁"})
-			return
-		}
 		bg, revision, err := a.saveBackground(r)
 		if err != nil {
 			writeJSON(w, 400, map[string]any{"error": err.Error()})
@@ -290,13 +249,6 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if method == "DELETE" && path == "/api/background" {
-		a.mu.Lock()
-		allowed := time.Now().Before(s.EditUntil)
-		a.mu.Unlock()
-		if !allowed {
-			writeJSON(w, 403, map[string]any{"error": "编辑已锁定，请重新解锁"})
-			return
-		}
 		revision, err := a.clearBackground()
 		if err != nil {
 			writeJSON(w, 500, map[string]any{"error": "背景清除失败"})
@@ -306,13 +258,6 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if method == "PUT" && path == "/api/data" {
-		a.mu.Lock()
-		allowed := time.Now().Before(s.EditUntil)
-		a.mu.Unlock()
-		if !allowed {
-			writeJSON(w, 403, map[string]any{"error": "编辑已锁定，请重新解锁"})
-			return
-		}
 		var input SaveRequest
 		if err := readJSON(r, &input); err != nil {
 			writeJSON(w, 400, map[string]any{"error": err.Error()})
