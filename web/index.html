@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
-  <meta name="theme-color" content="#f5f1e8">
+  <meta name="theme-color" content="#f8fafc">
   <title>我的导航</title>
   <link rel="stylesheet" href="/style.css">
   <script defer src="/vue.global.js"></script>
@@ -33,7 +33,7 @@
       <div class="toolbar-inner">
         <div class="brand">
           <span class="brand-mark">N</span>
-          <span class="brand-text"><strong>我的导航</strong><small>{{ totalLinks }} 个入口</small></span>
+          <span class="brand-text"><strong>我的导航</strong><small>{{ totalLinks }} 个网站</small></span>
         </div>
         <div class="search-wrap">
           <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="m16 16 4 4"></path></svg>
@@ -42,27 +42,15 @@
           <button v-else type="button" class="search-clear" title="清空搜索" @click="search=''">×</button>
         </div>
         <div class="toolbar-actions">
-          <button v-if="editing" class="text-button" type="button" :disabled="busy" @click="exportBackup" title="导出完整备份">导出</button>
-          <label v-if="editing" class="text-button upload-button" :class="{disabled:busy}" title="导入完整备份">
-            导入
-            <input type="file" accept=".zip,application/zip" :disabled="busy" @change="importBackup">
-          </label>
-          <label v-if="editing" class="text-button upload-button" title="上传背景图片">
-            背景
-            <input type="file" accept="image/jpeg,image/png,image/gif,image/webp" :disabled="busy" @change="uploadBackground">
-          </label>
-          <button v-if="editing && backgroundImage" class="quiet-button" type="button" @click="clearBackground" title="清除背景图片">清除背景</button>
-          <button v-if="editing" class="text-button add-category" @click="openCategoryForm()">＋ 分类</button>
-          <button class="action-button" :class="{active:editing}" type="button" @click="toggleEditing">{{ editing ? '完成' : '编辑' }}</button>
-          <button class="quiet-button" type="button" @click="lockPage" title="锁定页面">锁定</button>
+          <button class="quiet-button lock-btn" type="button" @click="lockPage" title="锁定页面">
+            <svg class="action-icon" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2" stroke="currentColor" stroke-width="2" fill="none"/><path d="M7 11V7a5 5 0 0 1 10 0v4" stroke="currentColor" stroke-width="2" fill="none"/></svg>
+            <span>锁定</span>
+          </button>
         </div>
       </div>
     </header>
 
     <div class="content">
-      <div class="edit-notice" v-if="editing && !search">拖动卡片左侧的排序柄调整顺序，分类也可以拖动。</div>
-      <div class="edit-notice" v-else-if="editing && search">清空搜索后可以拖动排序。</div>
-
       <template v-if="filteredCategories.length">
         <section v-for="category in filteredCategories" :key="category.id" class="section" :data-category-id="category.id">
           <div class="section-title">
@@ -75,26 +63,80 @@
             <div v-for="link in category.links" :key="link.id" class="link-tile" :data-link-id="link.id" :data-cat-id="category.id" :class="{'is-editing':editing}">
               <button v-if="editing && !search" class="grip link-grip" type="button" title="拖动排序" aria-label="拖动排序" @pointerdown="startPointer($event,'link',category.id,link.id)">⠿</button>
               <button v-if="editing" class="tile-link tile-edit" type="button" @click="openLinkForm(category.id,link)" :title="link.url + ' · 点击编辑'">
-                <span class="favicon"><img v-if="!faviconErrors[link.id]" :src="faviconUrl(link.url)" alt="" loading="lazy" referrerpolicy="no-referrer" @error="faviconErrors[link.id]=true"><span v-else>{{ link.icon || link.name.slice(0,1) }}</span></span><span class="tile-name">{{ link.name }}</span>
+                <span class="favicon"><img v-if="!faviconErrors[link.id]" :src="faviconUrl(link.url)" alt="" loading="lazy" referrerpolicy="no-referrer" @error="faviconErrors[link.id]=true"><span v-else>{{ link.icon || link.name.slice(0,1) }}</span></span>
+                <span class="tile-name">{{ link.name }}</span>
+                <span class="tile-badge-edit">编辑</span>
               </button>
               <a v-else class="tile-link" :href="link.url" target="_blank" rel="noopener noreferrer" :title="link.url">
-                <span class="favicon"><img v-if="!faviconErrors[link.id]" :src="faviconUrl(link.url)" alt="" loading="lazy" referrerpolicy="no-referrer" @error="faviconErrors[link.id]=true"><span v-else>{{ link.icon || link.name.slice(0,1) }}</span></span><span class="tile-name">{{ link.name }}</span>
+                <span class="favicon"><img v-if="!faviconErrors[link.id]" :src="faviconUrl(link.url)" alt="" loading="lazy" referrerpolicy="no-referrer" @error="faviconErrors[link.id]=true"><span v-else>{{ link.icon || link.name.slice(0,1) }}</span></span>
+                <span class="tile-name">{{ link.name }}</span>
+                <svg class="tile-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M7 7h10v10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
               </a>
             </div>
             <button v-if="editing && !search" type="button" class="add-link-tile" @click="openLinkForm(category.id)"><span>＋</span><span>添加网址</span></button>
             <div v-else-if="!category.links.length && !search" class="category-empty">暂无网址</div>
           </div>
         </section>
+        <div v-if="editing && !search" class="add-category-section">
+          <button type="button" class="add-category-card" @click="openCategoryForm()">
+            <span class="plus-icon">＋</span>
+            <span>新建分类</span>
+          </button>
+        </div>
       </template>
       <div v-else class="empty-state">
         <template v-if="search">找不到与「{{ search }}」匹配的网址。</template>
         <template v-else>还没有分类。<button type="button" v-if="editing" @click="openCategoryForm()">新建分类</button></template>
       </div>
     </div>
+
+    <!-- 悬浮操作栏（Floating Dock） -->
+    <aside class="floating-dock" :class="{'is-editing': editing}" aria-label="管理操作">
+      <template v-if="editing">
+        <div class="dock-group">
+          <button class="dock-btn" type="button" @click="openCategoryForm()" title="新建分类">
+            <svg class="dock-icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            <span>分类</span>
+          </button>
+          <div class="dock-dropdown-wrap">
+            <label class="dock-btn dock-upload" :class="{disabled: busy}" title="更换背景图片">
+              <svg class="dock-icon" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3" stroke="currentColor" stroke-width="2" fill="none"/><circle cx="8.5" cy="8.5" r="1.5" fill="currentColor"/><path d="m21 15-5-5L5 21" stroke="currentColor" stroke-width="2" fill="none"/></svg>
+              <span>背景</span>
+              <input type="file" accept="image/jpeg,image/png,image/gif,image/webp" :disabled="busy" @change="uploadBackground">
+            </label>
+            <button v-if="backgroundImage" class="dock-sub-btn" type="button" @click="clearBackground" title="清除背景图片" aria-label="清除背景">×</button>
+          </div>
+          <button class="dock-btn" type="button" :disabled="busy" @click="exportBackup" title="导出完整备份 (.zip)">
+            <svg class="dock-icon" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+            <span>导出</span>
+          </button>
+          <label class="dock-btn dock-upload" :class="{disabled: busy}" title="导入完整备份 (.zip)">
+            <svg class="dock-icon" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+            <span>导入</span>
+            <input type="file" accept=".zip,application/zip" :disabled="busy" @change="importBackup">
+          </label>
+          <button class="dock-btn" type="button" @click="openBatchModal()" title="批量粘贴导入 Chrome 书签">
+            <svg class="dock-icon" viewBox="0 0 24 24"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1" stroke="currentColor" stroke-width="2" fill="none"/><path d="M9 12h6M9 16h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            <span>粘贴导入</span>
+          </button>
+        </div>
+        <div class="dock-divider"></div>
+        <button class="dock-btn dock-btn-primary" type="button" @click="toggleEditing" title="完成编辑">
+          <svg class="dock-icon" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+          <span>完成</span>
+        </button>
+      </template>
+      <template v-else>
+        <button class="dock-trigger-btn" type="button" @click="toggleEditing" title="编辑网站与分类">
+          <svg class="dock-icon" viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+          <span>编辑</span>
+        </button>
+      </template>
+    </aside>
   </div>
 
   <div v-if="modal" class="modal-mask" @click.self="closeModal">
-    <form class="modal" @submit.prevent="submitModal" role="dialog" aria-modal="true" :aria-label="modalTitle">
+    <form class="modal" :class="{'modal-batch': modal==='batch'}" @submit.prevent="submitModal" role="dialog" aria-modal="true" :aria-label="modalTitle">
       <div class="modal-head"><h3>{{ modalTitle }}</h3><button class="icon-close" type="button" @click="closeModal" aria-label="关闭">×</button></div>
       <template v-if="modal==='category'">
         <label class="field-label" for="category-name">分类名称</label>
@@ -109,12 +151,62 @@
         <label class="field-label" for="link-icon">图标文字 <span class="optional">（可选，1–8 个字符）</span></label>
         <input id="link-icon" v-model="form.icon" maxlength="8" placeholder="例如：☁、G、📁" spellcheck="false">
       </template>
+      <template v-else-if="modal==='batch'">
+        <div class="batch-field-row">
+          <label class="field-label" for="batch-cat">目标分类</label>
+          <div class="batch-cat-selects">
+            <select id="batch-cat" v-model="batchForm.targetCatId" @change="onBatchCategoryChange">
+              <option v-for="c in categories" :key="c.id" :value="c.id">现有分类：{{ c.name }}</option>
+              <option value="__new__">＋ 新建分类...</option>
+            </select>
+            <input v-if="batchForm.targetCatId==='__new__'" v-model.trim="batchForm.newCatName" placeholder="输入新分类名称" required maxlength="40" @input="onBatchTextInput">
+          </div>
+        </div>
+
+        <label class="field-label" for="batch-input">
+          在下方粘贴书签
+          <span class="optional">（在 Chrome 书签页选中多条书签复制后，在此粘贴）</span>
+        </label>
+        <div class="batch-textarea-wrap">
+          <textarea
+            id="batch-input"
+            ref="batchTextarea"
+            v-model="batchForm.rawText"
+            placeholder="点击此处按 Cmd+V 或 Ctrl+V 粘贴&#10;支持 Chrome 多选书签、网页链接、Markdown 链接或文本网址列表"
+            rows="4"
+            @paste="handleBatchPaste"
+            @input="onBatchTextInput"
+          ></textarea>
+        </div>
+
+        <!-- 识别预览 -->
+        <div v-if="batchForm.items.length" class="batch-preview-box">
+          <div class="batch-preview-head">
+            <span>识别到 <strong>{{ batchForm.items.length }}</strong> 个网站</span>
+            <span class="batch-stats">
+              <span class="stat-valid">可导入 {{ batchValidCount }} 个</span>
+              <span v-if="batchDuplicateCount" class="stat-dup">跳过重复 {{ batchDuplicateCount }} 个</span>
+            </span>
+          </div>
+          <div class="batch-preview-list">
+            <div v-for="(item, idx) in batchForm.items" :key="idx" class="batch-item-row" :class="{'is-duplicate': item.isDuplicate}">
+              <span class="item-cat-tag">{{ item.categoryName }}</span>
+              <span class="item-name" :title="item.name">{{ item.name }}</span>
+              <span class="item-url" :title="item.url">{{ item.url }}</span>
+              <span v-if="item.isDuplicate" class="item-status-badge dup">已存在</span>
+              <span v-else class="item-status-badge new">新增</span>
+            </div>
+          </div>
+        </div>
+      </template>
       <p v-if="modalError" class="form-error">{{ modalError }}</p>
       <div class="modal-actions">
         <button v-if="(modal==='link'||modal==='category') && form.id" class="danger-link" type="button" @click="deleteItem">删除</button>
         <div class="modal-spacer"></div>
         <button type="button" class="secondary" @click="closeModal">取消</button>
-        <button class="primary" type="submit" :disabled="busy">{{ busy ? '请稍候…' : '保存' }}</button>
+        <button class="primary" type="submit" :disabled="busy || (modal==='batch' && (batchValidCount === 0 || !batchForm.items.length))">
+          {{ busy ? '请稍候…' : (modal==='batch' ? (batchValidCount > 0 ? ('导入 ' + batchValidCount + ' 个网站') : '导入') : '保存') }}
+        </button>
       </div>
     </form>
   </div>

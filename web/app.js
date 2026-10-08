@@ -65,6 +65,7 @@
         categories: [], backgroundImage: '', revision: '', search: '',
         faviconErrors: {},
         modal: '', form: { id: '', catId: '', name: '', url: '', icon: '', description: '' },
+        batchForm: { targetCatId: '', newCatName: '', rawText: '', items: [] },
         toast: ''
       };
     },
@@ -79,6 +80,12 @@
       },
       totalLinks() {
         return this.categories.reduce((sum, cat) => sum + cat.links.length, 0);
+      },
+      batchValidCount() {
+        return (this.batchForm && this.batchForm.items ? this.batchForm.items.filter(i => !i.isDuplicate).length : 0);
+      },
+      batchDuplicateCount() {
+        return (this.batchForm && this.batchForm.items ? this.batchForm.items.filter(i => i.isDuplicate).length : 0);
       },
       urlDuplicate() {
         if (this.modal !== 'link' || !this.form.url.trim()) return null;
@@ -97,6 +104,7 @@
       modalTitle() {
         if (this.modal === 'category') return this.form.id ? '编辑分类' : '新建分类';
         if (this.modal === 'link') return this.form.id ? '编辑网址' : '添加网址';
+        if (this.modal === 'batch') return '批量粘贴导入书签';
         return '';
       }
     },
@@ -170,9 +178,178 @@
         this.form = { id: link ? link.id : '', catId, name: link ? link.name : '', url: link ? link.url : '', icon: link ? link.icon : '', description: link ? (link.description || '') : '' };
         this.focusModal();
       },
+      openBatchModal() {
+        if (!this.editing) return;
+        this.modal = 'batch';
+        this.modalError = '';
+        this.batchForm = {
+          targetCatId: this.categories.length ? this.categories[0].id : '__new__',
+          newCatName: '',
+          rawText: '',
+          items: []
+        };
+        this.$nextTick(() => {
+          if (this.$refs.batchTextarea) this.$refs.batchTextarea.focus();
+        });
+      },
+      getDefaultCategoryName() {
+        if (this.batchForm.targetCatId === '__new__') {
+          return this.batchForm.newCatName.trim() || '新建分类';
+        }
+        const found = this.categories.find(c => c.id === this.batchForm.targetCatId);
+        return found ? found.name : '常用网站';
+      },
+      handleBatchPaste(e) {
+        let html = '';
+        let text = '';
+        if (e.clipboardData) {
+          html = e.clipboardData.getData('text/html') || '';
+          text = e.clipboardData.getData('text/plain') || '';
+        }
+        setTimeout(() => {
+          const raw = this.batchForm.rawText || text;
+          this.parsePastedContent(html, raw);
+        }, 20);
+      },
+      onBatchTextInput() {
+        this.parsePastedContent('', this.batchForm.rawText);
+      },
+      onBatchCategoryChange() {
+        this.parsePastedContent('', this.batchForm.rawText);
+      },
+      parsePastedContent(html, text) {
+        const defaultCatName = this.getDefaultCategoryName();
+        const existingKeys = new Set();
+        for (const cat of this.categories) {
+          for (const l of cat.links) {
+            try { existingKeys.add(addressKey(l.url)); } catch (_) {}
+          }
+        }
+
+        const rawList = [];
+
+        // 1. 尝试 HTML 结构解析（Chrome 书签管理器多选复制带有完整的 A 标签和目录）
+        if (html && /<a\s+[^>]*href=/i.test(html)) {
+          try {
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, 'text/html');
+            let currentFolder = defaultCatName;
+            const elements = doc.querySelectorAll('h1, h2, h3, h4, h5, h6, dt, a');
+            elements.forEach(el => {
+              const tag = el.tagName.toUpperCase();
+              if (['H1', 'H2', 'H3', 'H4', 'H5', 'H6'].includes(tag)) {
+                const t = el.textContent.trim();
+                if (t) currentFolder = t;
+              } else if (tag === 'A') {
+                const href = el.getAttribute('href') || el.href;
+                const name = el.textContent.trim();
+                if (href && /^https?:\/\//i.test(href)) {
+                  rawList.push({ catName: currentFolder, name: name || href, url: href });
+                }
+              }
+            });
+          } catch (_) {}
+        }
+
+        // 2. 如果 HTML 未识别出任何链接，从纯文本逐行解析
+        if (!rawList.length && text) {
+          const lines = text.split(/\r?\n/);
+          let currentFolder = defaultCatName;
+          for (let line of lines) {
+            line = line.trim();
+            if (!line) continue;
+            const catMatch = line.match(/^#+\s*(.+)$/) || line.match(/^【(.+?)】$/) || line.match(/^📁?\s*([^:：]+)[:：]$/);
+            if (catMatch && !/https?:\/\//i.test(line)) {
+              currentFolder = catMatch[1].trim();
+              continue;
+            }
+            const mdMatch = line.match(/\[(.*?)\]\((https?:\/\/[^\s\)]+)\)/i);
+            if (mdMatch) {
+              rawList.push({ catName: currentFolder, name: mdMatch[1].trim() || mdMatch[2], url: mdMatch[2] });
+              continue;
+            }
+            const urlMatch = line.match(/(https?:\/\/[^\s]+)/i);
+            if (urlMatch) {
+              const u = urlMatch[1];
+              let n = line.replace(u, '').trim();
+              n = n.replace(/^[-*•\d\.\s、]+/, '').trim();
+              if (!n) {
+                try { n = new URL(u).hostname; } catch (_) { n = u; }
+              }
+              rawList.push({ catName: currentFolder, name: n, url: u });
+            }
+          }
+        }
+
+        // 3. 规范化并标记重复
+        const seenBatchKeys = new Set();
+        const items = [];
+        for (const item of rawList) {
+          let validUrl = '';
+          let key = '';
+          try {
+            validUrl = normalizedUrl(item.url);
+            key = addressKey(validUrl);
+            validUrl = new URL(validUrl).href;
+          } catch (_) {
+            continue;
+          }
+
+          const isDuplicate = existingKeys.has(key) || seenBatchKeys.has(key);
+          if (!isDuplicate) {
+            seenBatchKeys.add(key);
+          }
+          items.push({
+            categoryName: item.catName || defaultCatName,
+            name: (item.name || validUrl).slice(0, 60),
+            url: validUrl,
+            isDuplicate
+          });
+        }
+
+        this.batchForm.items = items;
+      },
       async submitModal() {
         if (this.busy) return;
         this.modalError = '';
+        if (this.modal === 'batch') {
+          if (this.batchForm.targetCatId === '__new__' && !this.batchForm.newCatName.trim()) {
+            const hasDetectedCat = this.batchForm.items.some(i => i.categoryName && i.categoryName !== '新建分类');
+            if (!hasDetectedCat) {
+              this.modalError = '请输入新分类名称';
+              return;
+            }
+          }
+          const validItems = this.batchForm.items.filter(i => !i.isDuplicate);
+          if (!validItems.length) {
+            this.modalError = '没有可导入的新网站（网址已全部存在或未识别到有效网址）';
+            return;
+          }
+
+          let addedCount = 0;
+          for (const item of validItems) {
+            const catName = item.categoryName.trim() || this.getDefaultCategoryName();
+            let targetCat = this.categories.find(c => c.name.toLowerCase() === catName.toLowerCase());
+            if (!targetCat) {
+              targetCat = { id: uid(), name: catName, links: [] };
+              this.categories.push(targetCat);
+            }
+            targetCat.links.push({
+              id: uid(),
+              name: item.name,
+              url: item.url,
+              icon: '',
+              description: ''
+            });
+            addedCount++;
+          }
+
+          const dupCount = this.batchDuplicateCount;
+          this.modal = '';
+          await this.persist();
+          this.notify(`已成功导入 ${addedCount} 个网站${dupCount ? `，跳过 ${dupCount} 个重复项` : ''}`);
+          return;
+        }
         const form = clone(this.form);
         if (!form.name.trim()) { this.modalError = '请输入名称'; return; }
         if (this.modal === 'category') {
