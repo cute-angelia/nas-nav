@@ -6,7 +6,8 @@ ARG TARGETOS
 ARG TARGETARCH
 
 WORKDIR /src
-COPY go.mod main.go ./
+COPY go.mod ./
+COPY *.go ./
 COPY web ./web
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
     go build -trimpath -ldflags="-s -w" -o /nav .

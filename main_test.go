@@ -7,10 +7,21 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestDockerfileCopiesAllGoSources(t *testing.T) {
+	dockerfile, err := os.ReadFile("Dockerfile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(dockerfile), "COPY *.go ./") {
+		t.Fatal("Dockerfile must copy every Go source file used by the main package")
+	}
+}
 
 func TestPageAuthEditAndPersistence(t *testing.T) {
 	a, err := newApp("long-private-password", filepath.Join(t.TempDir(), "navigation.json"), false)
