@@ -388,4 +388,122 @@ func TestFaviconEndpoint(t *testing.T) {
 	}
 }
 
+func TestTitleAndLogoPersistenceAndUpload(t *testing.T) {
+	tmpFile := filepath.Join(t.TempDir(), "navigation.json")
+	a, err := newApp("secret-pass", tmpFile, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. 未登录访问 /api/me，应该正常返回且无需密码
+	reqMe := httptest.NewRequest("GET", "/api/me", nil)
+	wMe := httptest.NewRecorder()
+	a.ServeHTTP(wMe, reqMe)
+	if wMe.Code != 200 {
+		t.Fatalf("expected 200 for /api/me, got %d", wMe.Code)
+	}
+
+	// 2. 登录
+	loginBody := bytes.NewBufferString(`{"password":"secret-pass"}`)
+	reqLogin := httptest.NewRequest("POST", "/api/login", loginBody)
+	reqLogin.Header.Set("Content-Type", "application/json")
+	reqLogin.Header.Set("X-Nav-Request", "1")
+	wLogin := httptest.NewRecorder()
+	a.ServeHTTP(wLogin, reqLogin)
+	if wLogin.Code != 200 {
+		t.Fatalf("login failed: %d %s", wLogin.Code, wLogin.Body.String())
+	}
+	cookie := wLogin.Result().Cookies()[0]
+
+	// 3. 读取当前 revision
+	reqData := httptest.NewRequest("GET", "/api/data", nil)
+	reqData.AddCookie(cookie)
+	wData := httptest.NewRecorder()
+	a.ServeHTTP(wData, reqData)
+	var dataResp struct {
+		Revision   string     `json:"revision"`
+		Categories []Category `json:"categories"`
+	}
+	if err := json.Unmarshal(wData.Body.Bytes(), &dataResp); err != nil {
+		t.Fatal(err)
+	}
+
+	// 4. 保存自定义 title
+	savePayload := map[string]any{
+		"revision":   dataResp.Revision,
+		"title":      "我的专属NAS导航",
+		"categories": dataResp.Categories,
+	}
+	saveBuf, _ := json.Marshal(savePayload)
+	reqSave := httptest.NewRequest("PUT", "/api/data", bytes.NewReader(saveBuf))
+	reqSave.AddCookie(cookie)
+	reqSave.Header.Set("Content-Type", "application/json")
+	reqSave.Header.Set("X-Nav-Request", "1")
+	wSave := httptest.NewRecorder()
+	a.ServeHTTP(wSave, reqSave)
+	if wSave.Code != 200 {
+		t.Fatalf("save title failed: %d %s", wSave.Code, wSave.Body.String())
+	}
+
+	// 5. 上传自定义 Logo (SVG 或 PNG)
+	var logoBuf bytes.Buffer
+	writer := multipart.NewWriter(&logoBuf)
+	part, err := writer.CreateFormFile("logo", "logo.svg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	svgContent := `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><circle cx="16" cy="16" r="16" fill="red"/></svg>`
+	part.Write([]byte(svgContent))
+	writer.Close()
+
+	reqLogo := httptest.NewRequest("POST", "/api/logo", &logoBuf)
+	reqLogo.AddCookie(cookie)
+	reqLogo.Header.Set("Content-Type", writer.FormDataContentType())
+	reqLogo.Header.Set("X-Nav-Request", "1")
+	wLogo := httptest.NewRecorder()
+	a.ServeHTTP(wLogo, reqLogo)
+	if wLogo.Code != 200 {
+		t.Fatalf("upload logo failed: %d %s", wLogo.Code, wLogo.Body.String())
+	}
+
+	var logoResp struct {
+		OK   bool   `json:"ok"`
+		Logo string `json:"logo"`
+	}
+	if err := json.Unmarshal(wLogo.Body.Bytes(), &logoResp); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(logoResp.Logo, "/media/logo?v=") {
+		t.Fatalf("unexpected logo url: %s", logoResp.Logo)
+	}
+
+	// 6. 公开访问 /media/logo，应该返回 200 和 svg 内容
+	reqMedia := httptest.NewRequest("GET", "/media/logo", nil)
+	wMedia := httptest.NewRecorder()
+	a.ServeHTTP(wMedia, reqMedia)
+	if wMedia.Code != 200 {
+		t.Fatalf("expected 200 for /media/logo, got %d", wMedia.Code)
+	}
+	if !strings.Contains(wMedia.Body.String(), "<svg") {
+		t.Fatalf("expected svg content from /media/logo")
+	}
+
+	// 7. /api/me 应该带有自定义 title 和 logo
+	wMe2 := httptest.NewRecorder()
+	a.ServeHTTP(wMe2, httptest.NewRequest("GET", "/api/me", nil))
+	var meResp struct {
+		Title string `json:"title"`
+		Logo  string `json:"logo"`
+	}
+	if err := json.Unmarshal(wMe2.Body.Bytes(), &meResp); err != nil {
+		t.Fatal(err)
+	}
+	if meResp.Title != "我的专属NAS导航" {
+		t.Fatalf("expected title '我的专属NAS导航', got %q", meResp.Title)
+	}
+	if meResp.Logo != logoResp.Logo {
+		t.Fatalf("expected logo %q, got %q", logoResp.Logo, meResp.Logo)
+	}
+}
+
 

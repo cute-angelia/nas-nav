@@ -19,9 +19,9 @@
 
   <main v-else-if="!loggedIn" class="login-page">
     <form class="login-card" action="/api/login" method="post" @submit.prevent="login">
-      <img class="login-mark" src="/favicon.svg" alt="NAS Nav Logo" width="46" height="46">
+      <img class="login-mark" :src="logo || '/favicon.svg'" alt="NAS Nav Logo" width="46" height="46">
       <p class="login-kicker">NAS NAV LITE</p>
-      <h1>我的导航</h1>
+      <h1>{{ title || '我的导航' }}</h1>
       <p>输入密码，查看私人收藏。</p>
 
       <!-- 隐藏用户名输入框，帮助 Chrome / Safari 密码管理器自动捕获凭据 -->
@@ -46,8 +46,20 @@
     <header class="toolbar">
       <div class="toolbar-inner">
         <div class="brand">
-          <img class="brand-mark" src="/favicon.svg" alt="NAS Nav Logo" width="34" height="34">
-          <span class="brand-text"><strong>我的导航</strong><small>{{ totalLinks }} 个网站</small></span>
+          <div class="brand-logo-wrap" :class="{'is-editing': editing}" @click="editing ? triggerLogoUpload() : null" :title="editing ? '点击更换 Logo' : ''">
+            <img class="brand-mark" :src="logo || '/favicon.svg'" alt="NAS Nav Logo" width="34" height="34">
+            <span v-if="editing" class="brand-logo-badge" title="点击更换 Logo">📷</span>
+            <input v-if="editing" ref="logoInput" type="file" accept="image/*" style="display:none" @change="uploadLogo">
+          </div>
+          <span class="brand-text">
+            <template v-if="editing">
+              <input class="brand-title-input" v-model.trim="title" @blur="onTitleChange" @keydown.enter.prevent="$event.target.blur()" placeholder="我的导航" maxlength="40">
+            </template>
+            <template v-else>
+              <strong>{{ title || '我的导航' }}</strong>
+            </template>
+            <small>{{ totalLinks }} 个网站</small>
+          </span>
         </div>
         <div class="search-wrap">
           <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="m16 16 4 4"></path></svg>
@@ -217,7 +229,7 @@
         <input id="link-url" v-model.trim="form.url" maxlength="2048" placeholder="https://example.com 或 http://192.168.1.1:5000" required spellcheck="false" aria-describedby="url-duplicate-hint">
         <p v-if="urlDuplicate" id="url-duplicate-hint" class="form-error">已存在于「{{ urlDuplicate.category }}」：{{ urlDuplicate.name }}（域名、端口和路径重复）</p>
         <label class="field-label" for="link-desc">描述 <span class="optional">（可选，小字展示在标题下方）</span></label>
-        <input id="link-desc" v-model.trim="form.description" maxlength="120" placeholder="例如：家庭影音与文件存储中心" spellcheck="false">
+        <input id="link-desc" v-model.trim="form.description" maxlength="120" placeholder="" spellcheck="false">
       </template>
       <template v-else-if="modal==='batch'">
         <div class="batch-field-row">

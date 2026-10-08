@@ -42,11 +42,15 @@ type Category struct {
 }
 type Navigation struct {
 	Version         int        `json:"version"`
+	Title           string     `json:"title,omitempty"`
+	Logo            string     `json:"logo,omitempty"`
 	BackgroundImage string     `json:"backgroundImage,omitempty"`
 	Categories      []Category `json:"categories"`
 }
 type SaveRequest struct {
 	Revision        string     `json:"revision"`
+	Title           string     `json:"title,omitempty"`
+	Logo            string     `json:"logo,omitempty"`
 	BackgroundImage string     `json:"backgroundImage,omitempty"`
 	Categories      []Category `json:"categories"`
 }
@@ -134,6 +138,10 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.serveBackground(w, r)
 		return
 	}
+	if r.URL.Path == "/media/logo" {
+		a.serveLogo(w, r)
+		return
+	}
 	if strings.HasPrefix(r.URL.Path, "/api/") {
 		a.api(w, r)
 		return
@@ -168,8 +176,13 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 	if method == "GET" && path == "/api/me" {
 		a.mu.Lock()
 		s := a.session(r)
+		data, _, _ := a.load()
 		a.mu.Unlock()
-		writeJSON(w, 200, map[string]any{"loggedIn": s != nil})
+		writeJSON(w, 200, map[string]any{
+			"loggedIn": s != nil,
+			"title":    data.Title,
+			"logo":     data.Logo,
+		})
 		return
 	}
 	if method == "POST" {
@@ -247,7 +260,14 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, 500, map[string]any{"error": "无法读取导航数据"})
 			return
 		}
-		writeJSON(w, 200, map[string]any{"version": 1, "backgroundImage": data.BackgroundImage, "categories": data.Categories, "revision": rev})
+		writeJSON(w, 200, map[string]any{
+			"version":         1,
+			"title":           data.Title,
+			"logo":            data.Logo,
+			"backgroundImage": data.BackgroundImage,
+			"categories":      data.Categories,
+			"revision":        rev,
+		})
 		return
 	}
 	if method == "GET" && path == "/api/fetch-title" {
@@ -318,6 +338,15 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"ok": true, "backgroundImage": bg, "revision": revision})
 		return
 	}
+	if method == "POST" && path == "/api/logo" {
+		logoURL, revision, err := a.saveLogo(r)
+		if err != nil {
+			writeJSON(w, 400, map[string]any{"error": err.Error()})
+			return
+		}
+		writeJSON(w, 200, map[string]any{"ok": true, "logo": logoURL, "revision": revision})
+		return
+	}
 	if method == "DELETE" && path == "/api/background" {
 		revision, err := a.clearBackground()
 		if err != nil {
@@ -333,7 +362,13 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, 400, map[string]any{"error": err.Error()})
 			return
 		}
-		data := Navigation{Version: 1, BackgroundImage: input.BackgroundImage, Categories: input.Categories}
+		data := Navigation{
+			Version:         1,
+			Title:           input.Title,
+			Logo:            input.Logo,
+			BackgroundImage: input.BackgroundImage,
+			Categories:      input.Categories,
+		}
 		if err := validate(data); err != nil {
 			writeJSON(w, 400, map[string]any{"error": err.Error()})
 			return
@@ -613,6 +648,130 @@ func (a *App) removeBackgroundFilesExcept(keep string) error {
 	return nil
 }
 
+func (a *App) serveLogo(w http.ResponseWriter, r *http.Request) {
+	file, contentType, err := a.logoFile()
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	http.ServeFile(w, r, file)
+}
+
+func (a *App) saveLogo(r *http.Request) (string, string, error) {
+	r.Body = http.MaxBytesReader(nil, r.Body, 2<<20)
+	if err := r.ParseMultipartForm(2 << 20); err != nil {
+		return "", "", fmt.Errorf("Logo 图片最大 2MB")
+	}
+	file, _, err := r.FormFile("logo")
+	if err != nil {
+		return "", "", fmt.Errorf("请选择 Logo 图片")
+	}
+	defer file.Close()
+	b, err := io.ReadAll(io.LimitReader(file, 2<<20+1))
+	if err != nil {
+		return "", "", fmt.Errorf("Logo 图片读取失败")
+	}
+	if len(b) == 0 || len(b) > 2<<20 {
+		return "", "", fmt.Errorf("Logo 图片最大 2MB")
+	}
+	contentType := http.DetectContentType(b)
+	ext := map[string]string{
+		"image/jpeg": ".jpg",
+		"image/png":  ".png",
+		"image/gif":  ".gif",
+		"image/webp": ".webp",
+	}[contentType]
+	if ext == "" {
+		header := string(b[:min(len(b), 512)])
+		if strings.Contains(header, "<svg") || contentType == "image/svg+xml" {
+			ext = ".svg"
+		}
+	}
+	if ext == "" {
+		return "", "", fmt.Errorf("只支持 JPG、PNG、GIF、WebP 或 SVG 图片")
+	}
+	dir := filepath.Dir(a.file)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return "", "", fmt.Errorf("保存目录不可写")
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if err := a.removeLogoFiles(); err != nil {
+		return "", "", fmt.Errorf("旧 Logo 清理失败")
+	}
+	path := filepath.Join(dir, "logo"+ext)
+	if err := os.WriteFile(path, b, 0600); err != nil {
+		return "", "", fmt.Errorf("Logo 保存失败")
+	}
+	data, _, err := a.load()
+	if err != nil {
+		return "", "", fmt.Errorf("导航数据读取失败")
+	}
+	hash := digest(string(b))[:12]
+	data.Logo = "/media/logo?v=" + hash
+	if err := a.writeData(data); err != nil {
+		return "", "", fmt.Errorf("导航数据保存失败")
+	}
+	_, revision, err := a.load()
+	if err != nil {
+		return "", "", fmt.Errorf("导航数据读取失败")
+	}
+	return data.Logo, revision, nil
+}
+
+func (a *App) removeLogoFiles() error {
+	var matches []string
+	for _, pattern := range []string{"logo.*", "logo-*.*"} {
+		found, err := filepath.Glob(filepath.Join(filepath.Dir(a.file), pattern))
+		if err != nil {
+			return err
+		}
+		matches = append(matches, found...)
+	}
+	for _, match := range matches {
+		if err := os.Remove(match); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
+}
+
+func (a *App) logoFile() (string, string, error) {
+	data, _, err := a.load()
+	if err != nil || data.Logo == "" {
+		return "", "", fmt.Errorf("Logo 不存在")
+	}
+	dir := filepath.Dir(a.file)
+	hash := strings.TrimPrefix(data.Logo, "/media/logo?v=")
+	patterns := []string{filepath.Join(dir, "logo-"+hash+".*"), filepath.Join(dir, "logo.*")}
+	var matches []string
+	for _, pattern := range patterns {
+		found, globErr := filepath.Glob(pattern)
+		if globErr != nil {
+			return "", "", globErr
+		}
+		matches = append(matches, found...)
+	}
+	if len(matches) == 0 {
+		return "", "", fmt.Errorf("Logo 不存在")
+	}
+	ext := strings.ToLower(filepath.Ext(matches[0]))
+	contentType := map[string]string{
+		".jpg":  "image/jpeg",
+		".jpeg": "image/jpeg",
+		".png":  "image/png",
+		".gif":  "image/gif",
+		".webp": "image/webp",
+		".svg":  "image/svg+xml",
+	}[ext]
+	if contentType == "" {
+		return "", "", fmt.Errorf("Logo 格式无效")
+	}
+	return matches[0], contentType, nil
+}
+
 func (a *App) backgroundFile() (string, string, error) {
 	data, _, err := a.load()
 	if err != nil || data.BackgroundImage == "" {
@@ -668,6 +827,12 @@ func addressKey(u *url.URL) (string, error) {
 }
 
 func validate(v Navigation) error {
+	if len([]rune(v.Title)) > 40 {
+		return fmt.Errorf("站点标题最多 40 个字符")
+	}
+	if len(v.Logo) > 2048 {
+		return fmt.Errorf("Logo 地址过长")
+	}
 	if len(v.Categories) > 40 {
 		return fmt.Errorf("分类最多 40 个")
 	}

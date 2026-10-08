@@ -62,6 +62,7 @@
       return {
         loading: true, loggedIn: false, editing: false, busy: false,
         password: '', rememberPassword: true, error: '', modalError: '',
+        title: '我的导航', logo: '',
         batchSelecting: false, selectedLinkIds: [],
         collapsedCategoryIds: [],
         categories: [], backgroundImage: '', revision: '', search: '',
@@ -129,6 +130,9 @@
       try {
         const s = await request('/api/me');
         this.loggedIn = s.loggedIn;
+        if (s.title) this.title = s.title;
+        if (s.logo) this.logo = s.logo;
+        if (this.title) document.title = this.title;
         if (s.loggedIn) await this.loadData();
       } catch (e) { this.notify(e.message); }
       this.loading = false;
@@ -137,10 +141,13 @@
     methods: {
       async loadData() {
         const d = await request('/api/data');
+        this.title = d.title || '我的导航';
+        this.logo = d.logo || '';
         this.categories = d.categories || [];
         this.backgroundImage = d.backgroundImage || '';
         this.revision = d.revision;
         this.faviconErrors = {};
+        if (this.title) document.title = this.title;
       },
       notify(message) {
         this.toast = message;
@@ -578,8 +585,16 @@
       persist() {
         const snapshot = clone(this.categories);
         const backgroundImage = this.backgroundImage;
+        const title = this.title || '我的导航';
+        const logo = this.logo || '';
         const task = saveQueue.then(async () => {
-          const result = await request('/api/data', 'PUT', { revision: this.revision, backgroundImage, categories: snapshot });
+          const result = await request('/api/data', 'PUT', {
+            revision: this.revision,
+            title,
+            logo,
+            backgroundImage,
+            categories: snapshot
+          });
           this.revision = result.revision;
         });
         saveQueue = task.catch(() => {});
@@ -591,6 +606,48 @@
           }
           this.notify(e.message);
         });
+      },
+      triggerLogoUpload() {
+        if (!this.editing) return;
+        if (this.$refs.logoInput) {
+          this.$refs.logoInput.click();
+        }
+      },
+      async uploadLogo(e) {
+        const file = e.target.files && e.target.files[0];
+        e.target.value = '';
+        if (!file) return;
+        if (!/^image\/(jpeg|png|gif|webp|svg\+xml)$/.test(file.type) && !file.name.toLowerCase().endsWith('.svg')) {
+          this.notify('只支持 JPG、PNG、GIF、WebP 或 SVG 图片');
+          return;
+        }
+        if (file.size > 2 * 1024 * 1024) { this.notify('Logo 图片最大 2MB'); return; }
+        const body = new FormData();
+        body.append('logo', file);
+        this.busy = true;
+        try {
+          const res = await fetch('/api/logo', {
+            method: 'POST',
+            credentials: 'same-origin',
+            cache: 'no-store',
+            headers: { 'X-Nav-Request': '1' },
+            body
+          });
+          const result = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(result.error || 'Logo 上传失败');
+          this.logo = result.logo || '';
+          this.revision = result.revision || this.revision;
+          // 用户明确要求：不用提示
+        } catch (err) { this.notify(err.message); }
+        finally { this.busy = false; }
+      },
+      async onTitleChange() {
+        if (!this.title.trim()) {
+          this.title = '我的导航';
+        }
+        document.title = this.title;
+        // 用户明确要求：不用提示，直接静默保存
+        await this.persist();
       },
       async uploadBackground(e) {
         const file = e.target.files && e.target.files[0];
