@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"io/fs"
 	"log"
@@ -17,6 +18,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -237,6 +239,16 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, 200, map[string]any{"version": 1, "backgroundImage": data.BackgroundImage, "categories": data.Categories, "revision": rev})
+		return
+	}
+	if method == "GET" && path == "/api/fetch-title" {
+		targetURL := strings.TrimSpace(r.URL.Query().Get("url"))
+		if targetURL == "" {
+			writeJSON(w, 200, map[string]any{"url": "", "title": ""})
+			return
+		}
+		title := fetchHTMLTitle(targetURL)
+		writeJSON(w, 200, map[string]any{"url": targetURL, "title": title})
 		return
 	}
 	if method == "GET" && path == "/api/backup" {
@@ -693,3 +705,57 @@ func validate(v Navigation) error {
 	}
 	return nil
 }
+
+var titleRegexp = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
+
+func fetchHTMLTitle(rawURL string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return ""
+	}
+
+	client := &http.Client{
+		Timeout: 3500 * time.Millisecond,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 5 {
+				return http.ErrUseLastResponse
+			}
+			return nil
+		},
+	}
+
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+	if err != nil {
+		return ""
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+
+	limitReader := io.LimitReader(resp.Body, 64*1024)
+	buf, err := io.ReadAll(limitReader)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return ""
+	}
+
+	matches := titleRegexp.FindSubmatch(buf)
+	if len(matches) < 2 {
+		return ""
+	}
+
+	rawTitle := string(matches[1])
+	rawTitle = strings.TrimSpace(regexp.MustCompile(`\s+`).ReplaceAllString(rawTitle, " "))
+	rawTitle = html.UnescapeString(rawTitle)
+	runes := []rune(rawTitle)
+	if len(runes) > 60 {
+		rawTitle = string(runes[:60])
+	}
+	return rawTitle
+}
+

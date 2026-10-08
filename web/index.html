@@ -182,7 +182,10 @@
         <!-- 识别预览 -->
         <div v-if="batchForm.items.length" class="batch-preview-box">
           <div class="batch-preview-head">
-            <span>识别到 <strong>{{ batchForm.items.length }}</strong> 个网站</span>
+            <div class="batch-preview-title">
+              <span>识别到 <strong>{{ batchForm.items.length }}</strong> 个网站</span>
+              <button type="button" class="btn-refetch" @click="autoFetchMissingTitles" title="联网探测网站真实标题">自动抓取标题</button>
+            </div>
             <span class="batch-stats">
               <span class="stat-valid">可导入 {{ batchValidCount }} 个</span>
               <span v-if="batchDuplicateCount" class="stat-dup">跳过重复 {{ batchDuplicateCount }} 个</span>
@@ -191,7 +194,10 @@
           <div class="batch-preview-list">
             <div v-for="(item, idx) in batchForm.items" :key="idx" class="batch-item-row" :class="{'is-duplicate': item.isDuplicate}">
               <span class="item-cat-tag">{{ item.categoryName }}</span>
-              <span class="item-name" :title="item.name">{{ item.name }}</span>
+              <div class="item-name-wrap">
+                <input v-model.trim="item.name" class="batch-name-input" placeholder="网站名称" maxlength="60" :disabled="item.isDuplicate">
+                <span v-if="item.fetching" class="fetching-spinner" title="正在抓取网站真实标题…">⏳</span>
+              </div>
               <span class="item-url" :title="item.url">{{ item.url }}</span>
               <span v-if="item.isDuplicate" class="item-status-badge dup">已存在</span>
               <span v-else class="item-status-badge new">新增</span>

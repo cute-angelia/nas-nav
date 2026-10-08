@@ -292,3 +292,69 @@ func TestAPIServerRejectsDuplicateSave(t *testing.T) {
 		t.Fatalf("different port rejected: %d %s", good.Code, good.Body.String())
 	}
 }
+
+func TestFetchHTMLTitleAPI(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write([]byte(`<!DOCTYPE html><html><head><title>  测试网页标题 &amp; Example  </title></head><body><h1>Hello</h1></body></html>`))
+	}))
+	defer ts.Close()
+
+	a, err := newApp("test-password", filepath.Join(t.TempDir(), "navigation.json"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 登录获取 session
+	loginReq := httptest.NewRequest("POST", "/api/login", strings.NewReader(`{"password":"test-password"}`))
+	loginReq.Header.Set("Content-Type", "application/json")
+	loginReq.Header.Set("X-Nav-Request", "1")
+	loginRec := httptest.NewRecorder()
+	a.ServeHTTP(loginRec, loginReq)
+	if loginRec.Code != 200 {
+		t.Fatalf("login failed: %d", loginRec.Code)
+	}
+	cookie := loginRec.Result().Cookies()[0]
+
+	// 1. 无参数或空 url，应该返回 200 且 title 为空，不报错打断
+	reqEmpty := httptest.NewRequest("GET", "/api/fetch-title", nil)
+	reqEmpty.AddCookie(cookie)
+	wEmpty := httptest.NewRecorder()
+	a.ServeHTTP(wEmpty, reqEmpty)
+	if wEmpty.Code != 200 {
+		t.Fatalf("empty url status %d != 200", wEmpty.Code)
+	}
+	var resEmpty map[string]string
+	if err := json.Unmarshal(wEmpty.Body.Bytes(), &resEmpty); err != nil {
+		t.Fatal(err)
+	}
+	if resEmpty["title"] != "" {
+		t.Fatalf("expected empty title, got %q", resEmpty["title"])
+	}
+
+	// 2. 有效 url，正确提取网页标题并解码 html 实体
+	reqValid := httptest.NewRequest("GET", "/api/fetch-title?url="+url.QueryEscape(ts.URL), nil)
+	reqValid.AddCookie(cookie)
+	wValid := httptest.NewRecorder()
+	a.ServeHTTP(wValid, reqValid)
+	if wValid.Code != 200 {
+		t.Fatalf("fetch title status %d != 200", wValid.Code)
+	}
+	var resValid map[string]string
+	if err := json.Unmarshal(wValid.Body.Bytes(), &resValid); err != nil {
+		t.Fatal(err)
+	}
+	if resValid["title"] != "测试网页标题 & Example" {
+		t.Fatalf("expected '测试网页标题 & Example', got %q", resValid["title"])
+	}
+
+	// 3. 无效或无法访问的 url，静默返回空标题，不返回 400 或 500
+	reqBad := httptest.NewRequest("GET", "/api/fetch-title?url=http://127.0.0.1:54321/not-found", nil)
+	reqBad.AddCookie(cookie)
+	wBad := httptest.NewRecorder()
+	a.ServeHTTP(wBad, reqBad)
+	if wBad.Code != 200 {
+		t.Fatalf("bad url status %d != 200", wBad.Code)
+	}
+}
+

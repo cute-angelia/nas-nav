@@ -253,11 +253,10 @@
 
         // 2. 如果 HTML 未识别出任何链接，从纯文本逐行解析
         if (!rawList.length && text) {
-          const lines = text.split(/\r?\n/);
+          const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
           let currentFolder = defaultCatName;
-          for (let line of lines) {
-            line = line.trim();
-            if (!line) continue;
+          for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
             const catMatch = line.match(/^#+\s*(.+)$/) || line.match(/^【(.+?)】$/) || line.match(/^📁?\s*([^:：]+)[:：]$/);
             if (catMatch && !/https?:\/\//i.test(line)) {
               currentFolder = catMatch[1].trim();
@@ -272,9 +271,20 @@
             if (urlMatch) {
               const u = urlMatch[1];
               let n = line.replace(u, '').trim();
-              n = n.replace(/^[-*•\d\.\s、]+/, '').trim();
+              n = n.replace(/^[-*•\d\.\s、|]+/, '').replace(/[-*•\s|]+$/, '').trim();
+              // 如果本行没有提取到标题，检查上一行是否是不含 URL 的纯标题文字（处理一行标题一行网址的格式）
+              if (!n && i > 0 && !/https?:\/\//i.test(lines[i - 1])) {
+                const prev = lines[i - 1].replace(/^[-*•\d\.\s、|]+/, '').trim();
+                if (!prev.match(/^#/) && !prev.match(/^【/) && prev.length <= 60) {
+                  n = prev;
+                }
+              }
               if (!n) {
-                try { n = new URL(u).hostname; } catch (_) { n = u; }
+                try {
+                  const parsedHost = new URL(u).hostname.replace(/^www\./, '');
+                  const part = parsedHost.split('.')[0];
+                  n = part ? (part.charAt(0).toUpperCase() + part.slice(1)) : parsedHost;
+                } catch (_) { n = u; }
               }
               rawList.push({ catName: currentFolder, name: n, url: u });
             }
@@ -303,11 +313,48 @@
             categoryName: item.catName || defaultCatName,
             name: (item.name || validUrl).slice(0, 60),
             url: validUrl,
-            isDuplicate
+            isDuplicate,
+            fetching: false
           });
         }
 
         this.batchForm.items = items;
+        this.autoFetchMissingTitles();
+      },
+      extractHostname(u) {
+        try { return new URL(u).hostname.replace(/^www\./, ''); } catch (_) { return u; }
+      },
+      async autoFetchMissingTitles() {
+        const queue = (this.batchForm.items || []).filter(item => {
+          if (!item.url || item.isDuplicate) return false;
+          const host = this.extractHostname(item.url);
+          const simpleName = host.split('.')[0].toLowerCase();
+          return !item.name || item.name === item.url || item.name.toLowerCase() === host.toLowerCase() || item.name.toLowerCase() === simpleName;
+        });
+        if (!queue.length) return;
+
+        queue.forEach(item => { item.fetching = true; });
+
+        const concurrency = 3;
+        let index = 0;
+        const worker = async () => {
+          while (index < queue.length) {
+            const currentItem = queue[index++];
+            if (!currentItem) break;
+            try {
+              const res = await request('/api/fetch-title?url=' + encodeURIComponent(currentItem.url));
+              if (res && res.title && res.title.trim()) {
+                currentItem.name = res.title.trim().slice(0, 60);
+              }
+            } catch (_) {
+            } finally {
+              currentItem.fetching = false;
+            }
+          }
+        };
+
+        const workers = Array.from({ length: Math.min(concurrency, queue.length) }, () => worker());
+        await Promise.all(workers);
       },
       async submitModal() {
         if (this.busy) return;
