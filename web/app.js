@@ -63,6 +63,7 @@
         loading: true, loggedIn: false, editing: false, busy: false,
         password: '', error: '', modalError: '',
         categories: [], backgroundImage: '', revision: '', search: '',
+        faviconErrors: {},
         modal: '', form: { id: '', catId: '', name: '', url: '', icon: '', description: '' },
         toast: ''
       };
@@ -115,11 +116,16 @@
         this.categories = d.categories || [];
         this.backgroundImage = d.backgroundImage || '';
         this.revision = d.revision;
+        this.faviconErrors = {};
       },
       notify(message) {
         this.toast = message;
         clearTimeout(toastTimer);
         toastTimer = setTimeout(() => { this.toast = ''; }, 3300);
+      },
+      faviconUrl(raw) {
+        try { return new URL('/favicon.ico', raw).href; }
+        catch (_) { return ''; }
       },
       async login() {
         this.error = ''; this.busy = true;
@@ -265,6 +271,65 @@
           this.notify('背景已清除');
         } catch (err) { this.notify(err.message); }
         finally { this.busy = false; }
+      },
+      async exportBackup() {
+        if (this.busy) return;
+        this.busy = true;
+        try {
+          const res = await fetch('/api/backup', { credentials: 'same-origin', cache: 'no-store' });
+          if (!res.ok) {
+            const result = await res.json().catch(() => ({}));
+            const error = new Error(result.error || '导出失败');
+            error.status = res.status;
+            throw error;
+          }
+          const disposition = res.headers.get('Content-Disposition') || '';
+          const match = disposition.match(/filename="([^"]+)"/i);
+          const filename = match ? match[1] : 'nas-nav-backup.zip';
+          const url = URL.createObjectURL(await res.blob());
+          const link = document.createElement('a');
+          link.href = url; link.download = filename;
+          document.body.appendChild(link); link.click(); link.remove();
+          URL.revokeObjectURL(url);
+          this.notify('备份已导出');
+        } catch (error) {
+          if (error.status === 401) { this.loggedIn = false; this.editing = false; }
+          this.notify(error.message);
+        } finally { this.busy = false; }
+      },
+      async importBackup(event) {
+        const file = event.target.files && event.target.files[0];
+        event.target.value = '';
+        if (!file || this.busy) return;
+        if (file.size > 8 * 1024 * 1024) { this.notify('备份文件最大 8MB'); return; }
+        this.busy = true;
+        try {
+          await saveQueue;
+          const body = new FormData();
+          body.append('backup', file);
+          body.append('revision', this.revision);
+          const res = await fetch('/api/backup', {
+            method: 'POST', credentials: 'same-origin', cache: 'no-store',
+            headers: { 'X-Nav-Request': '1' }, body
+          });
+          const result = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            const error = new Error(result.error || '导入失败');
+            error.status = res.status;
+            throw error;
+          }
+          this.categories = result.categories || [];
+          this.backgroundImage = result.backgroundImage || '';
+          this.revision = result.revision;
+          this.faviconErrors = {};
+          this.notify('备份已导入');
+        } catch (error) {
+          if (error.status === 401) { this.loggedIn = false; this.editing = false; }
+          if (error.status === 409) {
+            try { await this.loadData(); } catch (_) { /* keep current state */ }
+          }
+          this.notify(error.message);
+        } finally { this.busy = false; }
       },
       onKey(e) {
         const tag = document.activeElement && document.activeElement.tagName;

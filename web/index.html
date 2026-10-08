@@ -42,9 +42,14 @@
           <button v-else type="button" class="search-clear" title="清空搜索" @click="search=''">×</button>
         </div>
         <div class="toolbar-actions">
+          <button v-if="editing" class="text-button" type="button" :disabled="busy" @click="exportBackup" title="导出完整备份">导出</button>
+          <label v-if="editing" class="text-button upload-button" :class="{disabled:busy}" title="导入完整备份">
+            导入
+            <input type="file" accept=".zip,application/zip" :disabled="busy" @change="importBackup">
+          </label>
           <label v-if="editing" class="text-button upload-button" title="上传背景图片">
             背景
-            <input type="file" accept="image/jpeg,image/png,image/gif,image/webp" @change="uploadBackground">
+            <input type="file" accept="image/jpeg,image/png,image/gif,image/webp" :disabled="busy" @change="uploadBackground">
           </label>
           <button v-if="editing && backgroundImage" class="quiet-button" type="button" @click="clearBackground" title="清除背景图片">清除背景</button>
           <button v-if="editing" class="text-button add-category" @click="openCategoryForm()">＋ 分类</button>
@@ -70,10 +75,10 @@
             <div v-for="link in category.links" :key="link.id" class="link-tile" :data-link-id="link.id" :data-cat-id="category.id" :class="{'is-editing':editing}">
               <button v-if="editing && !search" class="grip link-grip" type="button" title="拖动排序" aria-label="拖动排序" @pointerdown="startPointer($event,'link',category.id,link.id)">⠿</button>
               <button v-if="editing" class="tile-link tile-edit" type="button" @click="openLinkForm(category.id,link)" :title="link.url + ' · 点击编辑'">
-                <span class="favicon">{{ link.icon || link.name.slice(0,1) }}</span><span class="tile-name">{{ link.name }}</span>
+                <span class="favicon"><img v-if="!faviconErrors[link.id]" :src="faviconUrl(link.url)" alt="" loading="lazy" referrerpolicy="no-referrer" @error="faviconErrors[link.id]=true"><span v-else>{{ link.icon || link.name.slice(0,1) }}</span></span><span class="tile-name">{{ link.name }}</span>
               </button>
               <a v-else class="tile-link" :href="link.url" target="_blank" rel="noopener noreferrer" :title="link.url">
-                <span class="favicon">{{ link.icon || link.name.slice(0,1) }}</span><span class="tile-name">{{ link.name }}</span>
+                <span class="favicon"><img v-if="!faviconErrors[link.id]" :src="faviconUrl(link.url)" alt="" loading="lazy" referrerpolicy="no-referrer" @error="faviconErrors[link.id]=true"><span v-else>{{ link.icon || link.name.slice(0,1) }}</span></span><span class="tile-name">{{ link.name }}</span>
               </a>
             </div>
             <button v-if="editing && !search" type="button" class="add-link-tile" @click="openLinkForm(category.id)"><span>＋</span><span>添加网址</span></button>

@@ -127,7 +127,7 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("X-Frame-Options", "DENY")
 	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self'; img-src 'self' data: http: https:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
 	if r.URL.Path == "/media/background" {
 		a.serveBackground(w, r)
 		return
@@ -237,6 +237,55 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, 200, map[string]any{"version": 1, "backgroundImage": data.BackgroundImage, "categories": data.Categories, "revision": rev})
+		return
+	}
+	if method == "GET" && path == "/api/backup" {
+		backup, err := a.buildBackup(time.Now())
+		if err != nil {
+			log.Printf("backup export error: %v", err)
+			writeJSON(w, 500, map[string]any{"error": "备份导出失败"})
+			return
+		}
+		filename := "nas-nav-backup-" + time.Now().UTC().Format("20060102-150405") + ".zip"
+		w.Header().Set("Content-Type", "application/zip")
+		w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(backup)
+		return
+	}
+	if method == "POST" && path == "/api/backup" {
+		r.Body = http.MaxBytesReader(w, r.Body, maxBackupUpload+(1<<20))
+		if err := r.ParseMultipartForm(maxBackupUpload + (1 << 20)); err != nil {
+			writeJSON(w, 400, map[string]any{"error": "备份文件最大 8MB"})
+			return
+		}
+		file, _, err := r.FormFile("backup")
+		if err != nil {
+			writeJSON(w, 400, map[string]any{"error": "请选择备份 ZIP"})
+			return
+		}
+		raw, readErr := io.ReadAll(io.LimitReader(file, maxBackupUpload+1))
+		_ = file.Close()
+		if readErr != nil || len(raw) > maxBackupUpload {
+			writeJSON(w, 400, map[string]any{"error": "备份文件最大 8MB"})
+			return
+		}
+		imported, err := parseBackup(raw)
+		if err != nil {
+			writeJSON(w, 400, map[string]any{"error": err.Error()})
+			return
+		}
+		data, revision, err := a.restoreBackup(imported, r.FormValue("revision"))
+		if errors.Is(err, errRevisionConflict) {
+			writeJSON(w, 409, map[string]any{"error": "数据已被其他页面修改，请刷新后重试"})
+			return
+		}
+		if err != nil {
+			log.Printf("backup import error: %v", err)
+			writeJSON(w, 500, map[string]any{"error": "备份导入失败"})
+			return
+		}
+		writeJSON(w, 200, map[string]any{"ok": true, "categories": data.Categories, "backgroundImage": data.BackgroundImage, "revision": revision})
 		return
 	}
 	if method == "POST" && path == "/api/background" {
@@ -520,11 +569,22 @@ func (a *App) clearBackground() (string, error) {
 }
 
 func (a *App) removeBackgroundFiles() error {
-	matches, err := filepath.Glob(filepath.Join(filepath.Dir(a.file), "background.*"))
-	if err != nil {
-		return err
+	return a.removeBackgroundFilesExcept("")
+}
+
+func (a *App) removeBackgroundFilesExcept(keep string) error {
+	var matches []string
+	for _, pattern := range []string{"background.*", "background-*.*"} {
+		found, err := filepath.Glob(filepath.Join(filepath.Dir(a.file), pattern))
+		if err != nil {
+			return err
+		}
+		matches = append(matches, found...)
 	}
 	for _, match := range matches {
+		if match == keep {
+			continue
+		}
 		if err := os.Remove(match); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
@@ -533,8 +593,22 @@ func (a *App) removeBackgroundFiles() error {
 }
 
 func (a *App) backgroundFile() (string, string, error) {
-	matches, err := filepath.Glob(filepath.Join(filepath.Dir(a.file), "background.*"))
-	if err != nil || len(matches) == 0 {
+	data, _, err := a.load()
+	if err != nil || data.BackgroundImage == "" {
+		return "", "", fmt.Errorf("背景不存在")
+	}
+	dir := filepath.Dir(a.file)
+	hash := strings.TrimPrefix(data.BackgroundImage, "/media/background?v=")
+	patterns := []string{filepath.Join(dir, "background-"+hash+".*"), filepath.Join(dir, "background.*")}
+	var matches []string
+	for _, pattern := range patterns {
+		found, globErr := filepath.Glob(pattern)
+		if globErr != nil {
+			return "", "", globErr
+		}
+		matches = append(matches, found...)
+	}
+	if len(matches) == 0 {
 		return "", "", fmt.Errorf("背景不存在")
 	}
 	ext := strings.ToLower(filepath.Ext(matches[0]))
