@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#f5f1e8">
+  <title>我的导航</title>
+  <link rel="stylesheet" href="/style.css">
+  <script defer src="/vue.global.js"></script>
+  <script defer src="/app.js"></script>
+</head>
+<body>
+<div id="app" v-cloak>
+  <div v-if="loading" class="app-loading">正在加载…</div>
+
+  <main v-else-if="!loggedIn" class="login-page">
+    <form class="login-card" @submit.prevent="login">
+      <div class="login-mark">N</div>
+      <p class="login-kicker">NAS NAV LITE</p>
+      <h1>我的导航</h1>
+      <p>输入密码，查看私人收藏。</p>
+      <label class="field-label" for="login-password">访问密码</label>
+      <input id="login-password" v-model="password" type="password" autocomplete="current-password" placeholder="请输入访问密码" required autofocus>
+      <p v-if="error" class="form-error">{{ error }}</p>
+      <button class="primary block" type="submit" :disabled="busy">{{ busy ? '解锁中…' : '解锁进入' }}</button>
+    </form>
+  </main>
+
+  <div v-else class="app-shell">
+    <header class="toolbar">
+      <div class="toolbar-inner">
+        <div class="brand">
+          <span class="brand-mark">N</span>
+          <span class="brand-text"><strong>我的导航</strong><small>{{ totalLinks }} 个入口</small></span>
+        </div>
+        <div class="search-wrap">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="m16 16 4 4"></path></svg>
+          <input ref="search" v-model.trim="search" type="search" placeholder="搜索网站" aria-label="搜索网站" spellcheck="false">
+          <kbd v-if="!search" class="key-hint">/</kbd>
+          <button v-else type="button" class="search-clear" title="清空搜索" @click="search=''">×</button>
+        </div>
+        <div class="toolbar-actions">
+          <button v-if="editing" class="text-button add-category" @click="openCategoryForm()">＋ 分类</button>
+          <button class="action-button" :class="{active:editing}" type="button" @click="toggleEditing">{{ editing ? '完成' : '编辑' }}</button>
+          <button class="quiet-button" type="button" @click="lockPage" title="锁定页面">锁定</button>
+        </div>
+      </div>
+    </header>
+
+    <div class="content">
+      <div class="edit-notice" v-if="editing && !search">拖动卡片左侧的排序柄调整顺序，分类也可以拖动。</div>
+      <div class="edit-notice" v-else-if="editing && search">清空搜索后可以拖动排序。</div>
+
+      <template v-if="filteredCategories.length">
+        <section v-for="category in filteredCategories" :key="category.id" class="section" :data-category-id="category.id">
+          <div class="section-title">
+            <button v-if="editing && !search" class="grip category-grip" type="button" title="拖动分类排序" aria-label="拖动分类排序" @pointerdown="startPointer($event,'category',category.id)">⠿</button>
+            <h2>{{ category.name }}</h2>
+            <button v-if="editing" class="section-action" type="button" @click="openCategoryForm(category)" title="编辑分类">编辑</button>
+            <button v-if="editing" class="section-action plus-action" type="button" @click="openLinkForm(category.id)" title="添加网址">＋ 添加</button>
+          </div>
+          <div class="link-grid" :data-cat-id="category.id">
+            <div v-for="link in category.links" :key="link.id" class="link-tile" :data-link-id="link.id" :data-cat-id="category.id" :class="{'is-editing':editing}">
+              <button v-if="editing && !search" class="grip link-grip" type="button" title="拖动排序" aria-label="拖动排序" @pointerdown="startPointer($event,'link',category.id,link.id)">⠿</button>
+              <button v-if="editing" class="tile-link tile-edit" type="button" @click="openLinkForm(category.id,link)" :title="link.url + ' · 点击编辑'">
+                <span class="favicon">{{ link.icon || link.name.slice(0,1) }}</span><span class="tile-name">{{ link.name }}</span>
+              </button>
+              <a v-else class="tile-link" :href="link.url" target="_blank" rel="noopener noreferrer" :title="link.url">
+                <span class="favicon">{{ link.icon || link.name.slice(0,1) }}</span><span class="tile-name">{{ link.name }}</span>
+              </a>
+            </div>
+            <button v-if="editing && !search" type="button" class="add-link-tile" @click="openLinkForm(category.id)"><span>＋</span><span>添加网址</span></button>
+            <div v-else-if="!category.links.length && !search" class="category-empty">暂无网址</div>
+          </div>
+        </section>
+      </template>
+      <div v-else class="empty-state">
+        <template v-if="search">找不到与「{{ search }}」匹配的网址。</template>
+        <template v-else>还没有分类。<button type="button" v-if="editing" @click="openCategoryForm()">新建分类</button></template>
+      </div>
+    </div>
+  </div>
+
+  <div v-if="modal" class="modal-mask" @click.self="closeModal">
+    <form class="modal" @submit.prevent="submitModal" role="dialog" aria-modal="true" :aria-label="modalTitle">
+      <div class="modal-head"><h3>{{ modalTitle }}</h3><button class="icon-close" type="button" @click="closeModal" aria-label="关闭">×</button></div>
+      <template v-if="modal==='unlock'">
+        <label class="field-label" for="edit-pass">编辑密码</label>
+        <input id="edit-pass" ref="modalInput" v-model="editPassword" type="password" autocomplete="current-password" placeholder="再次输入密码" required>
+      </template>
+      <template v-else-if="modal==='category'">
+        <label class="field-label" for="category-name">分类名称</label>
+        <input id="category-name" ref="modalInput" v-model.trim="form.name" maxlength="40" placeholder="例如：常用工具" required>
+      </template>
+      <template v-else-if="modal==='link'">
+        <label class="field-label" for="link-name">名称</label>
+        <input id="link-name" ref="modalInput" v-model.trim="form.name" maxlength="60" placeholder="例如：NAS 控制台" required>
+        <label class="field-label" for="link-url">网站地址</label>
+        <input id="link-url" v-model.trim="form.url" maxlength="2048" placeholder="https://example.com 或 http://192.168.1.1:5000" required spellcheck="false" aria-describedby="url-duplicate-hint">
+        <p v-if="urlDuplicate" id="url-duplicate-hint" class="form-error">已存在于「{{ urlDuplicate.category }}」：{{ urlDuplicate.name }}（域名、端口和路径重复）</p>
+        <label class="field-label" for="link-icon">图标文字 <span class="optional">（可选，1–8 个字符）</span></label>
+        <input id="link-icon" v-model="form.icon" maxlength="8" placeholder="例如：☁、G、📁" spellcheck="false">
+      </template>
+      <p v-if="modalError" class="form-error">{{ modalError }}</p>
+      <div class="modal-actions">
+        <button v-if="(modal==='link'||modal==='category') && form.id" class="danger-link" type="button" @click="deleteItem">删除</button>
+        <div class="modal-spacer"></div>
+        <button type="button" class="secondary" @click="closeModal">取消</button>
+        <button class="primary" type="submit" :disabled="busy">{{ busy ? '请稍候…' : (modal==='unlock' ? '解锁编辑' : '保存') }}</button>
+      </div>
+    </form>
+  </div>
+  <div v-if="toast" class="toast" role="status">{{ toast }}</div>
+</div>
+</body>
+</html>

@@ -1,0 +1,4 @@
+data/*.json
+.env
+nas-nav-lite
+.DS_Store

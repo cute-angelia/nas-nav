@@ -1,0 +1,18 @@
+services:
+  nav:
+    build: .
+    container_name: nas-nav-lite
+    restart: unless-stopped
+    environment:
+      NAV_PASSWORD: ${NAV_PASSWORD:?必须在 .env 中设置 NAV_PASSWORD}
+      COOKIE_SECURE: ${COOKIE_SECURE:-0}
+      PORT: 8787
+      DATA_DIR: /data
+    ports:
+      - "${PORT:-8787}:8787"
+    volumes:
+      - ./data:/data
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
