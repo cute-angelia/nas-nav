@@ -541,10 +541,19 @@
             this.modalError = `网址已存在：${this.urlDuplicate.category} / ${this.urlDuplicate.name}（域名、端口和路径重复）`;
             return;
           }
-          if (Array.from(form.icon).length > 8) { this.modalError = '图标最多 8 个字符'; return; }
+          if (form.description && Array.from(form.description).length > 120) {
+            this.modalError = '描述最多 120 个字符';
+            return;
+          }
           const cat = this.categories.find(c => c.id === form.catId);
           if (!cat) { this.modalError = '分类不存在'; return; }
-          const value = { id: form.id || uid(), name: form.name.trim(), url, icon: form.icon.trim(), description: form.description || '' };
+          const value = {
+            id: form.id || uid(),
+            name: form.name.trim(),
+            url,
+            icon: (form.icon || '').trim(),
+            description: (form.description || '').trim()
+          };
           if (form.id) {
             const index = cat.links.findIndex(l => l.id === form.id);
             if (index !== -1) cat.links.splice(index, 1, value);

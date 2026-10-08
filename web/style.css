@@ -66,16 +66,17 @@ a{text-decoration:none;color:inherit}
   box-shadow:0 1px 3px 0 rgba(15,23,42,.03);
 }
 .toolbar-inner{height:100%;max-width:1392px;margin:auto;padding:0 34px;display:flex;align-items:center;gap:28px}
-.brand{display:flex;align-items:center;flex:none;gap:12px;white-space:nowrap}
-.brand-mark,.login-mark{
-  display:grid;
-  place-items:center;
-  color:#fff;
-  background:linear-gradient(135deg,#3b82f6,#1d4ed8);
-  border:1px solid rgba(255,255,255,.2);
-  box-shadow:0 4px 12px rgba(37,99,235,.25);
+.brand-mark{
+  display:block;
+  width:34px;
+  height:34px;
+  border-radius:10px;
+  filter:drop-shadow(0 4px 10px rgba(37,99,235,.25));
+  transition:transform .2s cubic-bezier(0.16,1,0.3,1);
 }
-.brand-mark{width:34px;height:34px;border-radius:10px;font-weight:800;font-size:16px}
+.brand-mark:hover{
+  transform:scale(1.06) rotate(6deg);
+}
 .brand-text{display:flex;flex-direction:column;gap:1px}
 .brand-text strong{font-size:15px;font-weight:750;letter-spacing:-0.01em;color:var(--ink)}
 .brand-text small{font-size:11px;color:var(--muted);font-weight:550}
@@ -242,7 +243,7 @@ a{text-decoration:none;color:inherit}
   min-height:50px;
 }
 .link-tile,.add-link-tile{
-  height:58px;
+  height:62px;
   min-width:0;
   border:1px solid var(--line);
   background:#fff;
@@ -344,18 +345,37 @@ a{text-decoration:none;color:inherit}
   transform:scale(1.04);
 }
 .favicon img{display:block;width:20px;height:20px;object-fit:contain}
+.tile-info{
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+  flex:1;
+  min-width:0;
+  gap:1.5px;
+}
 .tile-name{
   display:block;
-  flex:1;
   min-width:0;
   overflow:hidden;
   text-overflow:ellipsis;
   white-space:nowrap;
   font-weight:650;
-  font-size:13.5px;
+  font-size:13px;
   color:#1e293b;
   letter-spacing:-0.01em;
+  line-height:1.25;
   transition:color .16s ease;
+}
+.tile-desc{
+  display:block;
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  font-weight:450;
+  font-size:11px;
+  color:var(--muted);
+  line-height:1.2;
 }
 .link-tile:hover .tile-name{color:var(--primary)}
 .tile-arrow{
@@ -594,7 +614,18 @@ a{text-decoration:none;color:inherit}
   height:4px;
   background:linear-gradient(90deg,#3b82f6,#06b6d4,#10b981);
 }
-.login-mark{width:44px;height:44px;border-radius:12px;font-size:22px;font-weight:850;margin-bottom:20px}
+.login-mark{
+  display:block;
+  width:48px;
+  height:48px;
+  border-radius:12px;
+  margin-bottom:20px;
+  filter:drop-shadow(0 6px 16px rgba(37,99,235,.28));
+  transition:transform .24s cubic-bezier(0.16,1,0.3,1);
+}
+.login-mark:hover{
+  transform:scale(1.05) rotate(5deg);
+}
 .login-kicker{margin:0 0 6px!important;color:var(--primary)!important;font-size:11px!important;font-weight:800;letter-spacing:.1em}
 .login-card h1{font-size:24px;font-weight:800;letter-spacing:-0.02em;margin:0 0 8px;color:var(--ink)}
 .login-card p:not(.form-error){margin:0 0 24px;font-size:13.5px;color:var(--muted)}

@@ -6,6 +6,8 @@
   <meta name="color-scheme" content="light">
   <meta name="theme-color" content="#f8fafc">
   <title>我的导航</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="apple-touch-icon" href="/favicon.svg">
   <link rel="stylesheet" href="/style.css">
   <script defer src="/vue.global.js"></script>
   <script defer src="/app.js"></script>
@@ -17,7 +19,7 @@
 
   <main v-else-if="!loggedIn" class="login-page">
     <form class="login-card" action="/api/login" method="post" @submit.prevent="login">
-      <div class="login-mark">N</div>
+      <img class="login-mark" src="/favicon.svg" alt="NAS Nav Logo" width="46" height="46">
       <p class="login-kicker">NAS NAV LITE</p>
       <h1>我的导航</h1>
       <p>输入密码，查看私人收藏。</p>
@@ -44,7 +46,7 @@
     <header class="toolbar">
       <div class="toolbar-inner">
         <div class="brand">
-          <span class="brand-mark">N</span>
+          <img class="brand-mark" src="/favicon.svg" alt="NAS Nav Logo" width="34" height="34">
           <span class="brand-text"><strong>我的导航</strong><small>{{ totalLinks }} 个网站</small></span>
         </div>
         <div class="search-wrap">
@@ -91,16 +93,25 @@
               <button v-if="editing && !batchSelecting && !search" class="grip link-grip" type="button" title="拖动排序" aria-label="拖动排序" @pointerdown="startPointer($event,'link',category.id,link.id)">⠿</button>
               <div v-if="batchSelecting" class="tile-link tile-selectable">
                 <span class="favicon"><img v-if="!faviconErrors[link.id]" :src="faviconUrl(link.url)" alt="" loading="lazy" referrerpolicy="no-referrer" @error="faviconErrors[link.id]=true"><span v-else>{{ link.icon || link.name.slice(0,1) }}</span></span>
-                <span class="tile-name">{{ link.name }}</span>
+                <div class="tile-info">
+                  <span class="tile-name">{{ link.name }}</span>
+                  <span v-if="link.description" class="tile-desc" :title="link.description">{{ link.description }}</span>
+                </div>
               </div>
               <button v-else-if="editing" class="tile-link tile-edit" type="button" @click="openLinkForm(category.id,link)" :title="link.url + ' · 点击编辑'">
                 <span class="favicon"><img v-if="!faviconErrors[link.id]" :src="faviconUrl(link.url)" alt="" loading="lazy" referrerpolicy="no-referrer" @error="faviconErrors[link.id]=true"><span v-else>{{ link.icon || link.name.slice(0,1) }}</span></span>
-                <span class="tile-name">{{ link.name }}</span>
+                <div class="tile-info">
+                  <span class="tile-name">{{ link.name }}</span>
+                  <span v-if="link.description" class="tile-desc" :title="link.description">{{ link.description }}</span>
+                </div>
                 <span class="tile-badge-edit">编辑</span>
               </button>
               <a v-else class="tile-link" :href="link.url" target="_blank" rel="noopener noreferrer" :title="link.url">
                 <span class="favicon"><img v-if="!faviconErrors[link.id]" :src="faviconUrl(link.url)" alt="" loading="lazy" referrerpolicy="no-referrer" @error="faviconErrors[link.id]=true"><span v-else>{{ link.icon || link.name.slice(0,1) }}</span></span>
-                <span class="tile-name">{{ link.name }}</span>
+                <div class="tile-info">
+                  <span class="tile-name">{{ link.name }}</span>
+                  <span v-if="link.description" class="tile-desc" :title="link.description">{{ link.description }}</span>
+                </div>
                 <svg class="tile-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M7 7h10v10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
               </a>
             </div>
@@ -205,8 +216,8 @@
         <label class="field-label" for="link-url">网站地址</label>
         <input id="link-url" v-model.trim="form.url" maxlength="2048" placeholder="https://example.com 或 http://192.168.1.1:5000" required spellcheck="false" aria-describedby="url-duplicate-hint">
         <p v-if="urlDuplicate" id="url-duplicate-hint" class="form-error">已存在于「{{ urlDuplicate.category }}」：{{ urlDuplicate.name }}（域名、端口和路径重复）</p>
-        <label class="field-label" for="link-icon">图标文字 <span class="optional">（可选，1–8 个字符）</span></label>
-        <input id="link-icon" v-model="form.icon" maxlength="8" placeholder="例如：☁、G、📁" spellcheck="false">
+        <label class="field-label" for="link-desc">描述 <span class="optional">（可选，小字展示在标题下方）</span></label>
+        <input id="link-desc" v-model.trim="form.description" maxlength="120" placeholder="例如：家庭影音与文件存储中心" spellcheck="false">
       </template>
       <template v-else-if="modal==='batch'">
         <div class="batch-field-row">

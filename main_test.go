@@ -358,3 +358,34 @@ func TestFetchHTMLTitleAPI(t *testing.T) {
 	}
 }
 
+func TestFaviconEndpoint(t *testing.T) {
+	a, err := newApp("test-password", filepath.Join(t.TempDir(), "navigation.json"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. /favicon.ico
+	wICO := httptest.NewRecorder()
+	a.ServeHTTP(wICO, httptest.NewRequest("GET", "/favicon.ico", nil))
+	if wICO.Code != 200 {
+		t.Fatalf("expected 200 for /favicon.ico, got %d", wICO.Code)
+	}
+	if !strings.Contains(wICO.Header().Get("Content-Type"), "image/svg+xml") {
+		t.Fatalf("expected image/svg+xml, got %q", wICO.Header().Get("Content-Type"))
+	}
+	if !strings.Contains(wICO.Body.String(), "<svg") {
+		t.Fatalf("expected svg content in /favicon.ico")
+	}
+
+	// 2. /favicon.svg
+	wSVG := httptest.NewRecorder()
+	a.ServeHTTP(wSVG, httptest.NewRequest("GET", "/favicon.svg", nil))
+	if wSVG.Code != 200 {
+		t.Fatalf("expected 200 for /favicon.svg, got %d", wSVG.Code)
+	}
+	if !strings.Contains(wSVG.Body.String(), "<svg") {
+		t.Fatalf("expected svg content in /favicon.svg")
+	}
+}
+
+
