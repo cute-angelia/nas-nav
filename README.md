@@ -2,6 +2,18 @@
 
 轻量白色导航首页。Go 1.23 + Vue 3.5.13；Vue 脚本随 Go `//go:embed` 编入程序，访问时无需外部 CDN；部署无需 Node.js、npm、数据库。
 
+## 界面预览
+
+### 导航编辑
+
+![NAS Nav Lite 导航编辑界面](docs/images/navigation-edit.jpg)
+
+### 登录
+
+<p align="center">
+  <img src="docs/images/login.jpg" alt="NAS Nav Lite 登录界面" width="720">
+</p>
+
 ## 功能
 
 - 浏览模式：紧凑网址网格、实时搜索、点击打开（新标签页）。
