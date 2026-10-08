@@ -12,6 +12,7 @@
 </head>
 <body>
 <div id="app" v-cloak>
+  <div v-if="loggedIn && backgroundImage" class="user-background" aria-hidden="true"><img :src="backgroundImage" alt=""></div>
   <div v-if="loading" class="app-loading">正在加载…</div>
 
   <main v-else-if="!loggedIn" class="login-page">
@@ -41,6 +42,11 @@
           <button v-else type="button" class="search-clear" title="清空搜索" @click="search=''">×</button>
         </div>
         <div class="toolbar-actions">
+          <label v-if="editing" class="text-button upload-button" title="上传背景图片">
+            背景
+            <input type="file" accept="image/jpeg,image/png,image/gif,image/webp" @change="uploadBackground">
+          </label>
+          <button v-if="editing && backgroundImage" class="quiet-button" type="button" @click="clearBackground" title="清除背景图片">清除背景</button>
           <button v-if="editing" class="text-button add-category" @click="openCategoryForm()">＋ 分类</button>
           <button class="action-button" :class="{active:editing}" type="button" @click="toggleEditing">{{ editing ? '完成' : '编辑' }}</button>
           <button class="quiet-button" type="button" @click="lockPage" title="锁定页面">锁定</button>

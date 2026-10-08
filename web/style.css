@@ -25,12 +25,23 @@ body{
   margin:0;
   min-width:320px;
   color:var(--ink);
-  background:
-    radial-gradient(circle at 18% 0%, rgba(255,255,255,.86) 0 220px, transparent 430px),
-    linear-gradient(135deg, rgba(63,115,86,.06) 0 25%, transparent 25% 50%, rgba(189,143,60,.08) 50% 75%, transparent 75%),
-    var(--canvas);
-  background-size:auto,28px 28px,auto;
+  background:var(--canvas);
 }
+#app{
+  position:relative;
+  isolation:isolate;
+  min-height:100vh;
+  background:
+    linear-gradient(180deg, rgba(245,241,232,.58), rgba(245,241,232,.9) 56%, var(--canvas)),
+    radial-gradient(circle at 18% 0%, rgba(255,255,255,.86) 0 220px, transparent 430px),
+    radial-gradient(circle at 84% 18%, rgba(224,205,154,.28) 0 180px, transparent 360px),
+    var(--canvas);
+  background-size:auto,auto,auto,auto;
+  background-position:center,center,center,center;
+}
+.user-background{position:fixed;inset:0;z-index:-1;overflow:hidden;background:var(--canvas)}
+.user-background:after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(245,241,232,.38),rgba(245,241,232,.86) 68%,var(--canvas))}
+.user-background img{width:100%;height:100%;object-fit:cover;display:block}
 button,input{font:inherit}
 button{cursor:pointer}
 button:disabled{cursor:default;opacity:.62}
@@ -64,6 +75,8 @@ a{text-decoration:none;color:inherit}
 .quiet-button,.text-button{background:transparent;border:0;font-size:13px;padding:9px 8px;color:#7f8a83}
 .quiet-button:hover,.text-button:hover{color:var(--green-deep)}
 .text-button{color:var(--green);font-weight:750}
+.upload-button{position:relative;display:inline-flex;align-items:center}
+.upload-button input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}
 
 .content{max-width:1392px;margin:0 auto;padding:34px 34px 92px}
 .section{margin-bottom:30px;position:relative}

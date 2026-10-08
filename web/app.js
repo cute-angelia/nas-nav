@@ -10,12 +10,19 @@
 
   async function request(path, method = 'GET', body) {
     let res;
+    const headers = {};
+    if (body !== undefined) {
+      headers['Content-Type'] = 'application/json';
+      headers['X-Nav-Request'] = '1';
+    } else if (!['GET', 'HEAD'].includes(method)) {
+      headers['X-Nav-Request'] = '1';
+    }
     try {
       res = await fetch(path, {
         method,
         credentials: 'same-origin',
         cache: 'no-store',
-        headers: body === undefined ? {} : { 'Content-Type': 'application/json', 'X-Nav-Request': '1' },
+        headers,
         body: body === undefined ? undefined : JSON.stringify(body)
       });
     } catch (_) { throw new Error('连接失败，请检查 NAS 是否在线'); }
@@ -55,7 +62,7 @@
       return {
         loading: true, loggedIn: false, editing: false, busy: false,
         password: '', editPassword: '', error: '', modalError: '',
-        categories: [], revision: '', search: '',
+        categories: [], backgroundImage: '', revision: '', search: '',
         modal: '', form: { id: '', catId: '', name: '', url: '', icon: '', description: '' },
         toast: ''
       };
@@ -108,6 +115,7 @@
       async loadData() {
         const d = await request('/api/data');
         this.categories = d.categories || [];
+        this.backgroundImage = d.backgroundImage || '';
         this.revision = d.revision;
       },
       notify(message) {
@@ -130,7 +138,7 @@
         this.clearPointer();
         try { await request('/api/logout', 'POST', {}); } catch (_) { /* session is cleared in UI */ }
         this.loggedIn = false; this.editing = false; this.password = '';
-        this.search = ''; this.categories = []; this.revision = '';
+        this.search = ''; this.categories = []; this.backgroundImage = ''; this.revision = '';
       },
       async toggleEditing() {
         if (this.editing) {
@@ -220,8 +228,9 @@
       },
       persist() {
         const snapshot = clone(this.categories);
+        const backgroundImage = this.backgroundImage;
         const task = saveQueue.then(async () => {
-          const result = await request('/api/data', 'PUT', { revision: this.revision, categories: snapshot });
+          const result = await request('/api/data', 'PUT', { revision: this.revision, backgroundImage, categories: snapshot });
           this.revision = result.revision;
         });
         saveQueue = task.catch(() => {});
@@ -237,6 +246,42 @@
           }
           this.notify(e.message);
         });
+      },
+      async uploadBackground(e) {
+        const file = e.target.files && e.target.files[0];
+        e.target.value = '';
+        if (!file) return;
+        if (!/^image\/(jpeg|png|gif|webp)$/.test(file.type)) { this.notify('只支持 JPG、PNG、GIF 或 WebP 图片'); return; }
+        if (file.size > 5 * 1024 * 1024) { this.notify('背景图片最大 5MB'); return; }
+        const body = new FormData();
+        body.append('background', file);
+        this.busy = true;
+        try {
+          const res = await fetch('/api/background', {
+            method: 'POST',
+            credentials: 'same-origin',
+            cache: 'no-store',
+            headers: { 'X-Nav-Request': '1' },
+            body
+          });
+          const result = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(result.error || '背景上传失败');
+          this.backgroundImage = result.backgroundImage || '';
+          this.revision = result.revision || this.revision;
+          this.notify('背景已更新');
+        } catch (err) { this.notify(err.message); }
+        finally { this.busy = false; }
+      },
+      async clearBackground() {
+        if (!this.backgroundImage) return;
+        this.busy = true;
+        try {
+          const result = await request('/api/background', 'DELETE');
+          this.backgroundImage = '';
+          this.revision = result.revision || this.revision;
+          this.notify('背景已清除');
+        } catch (err) { this.notify(err.message); }
+        finally { this.busy = false; }
       },
       onKey(e) {
         const tag = document.activeElement && document.activeElement.tagName;

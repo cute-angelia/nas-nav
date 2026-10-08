@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -81,6 +82,93 @@ func TestPageAuthEditAndPersistence(t *testing.T) {
 	}
 	if send("/api/data", "GET", nil, cookie).Code != 401 {
 		t.Fatal("logout did not invalidate session")
+	}
+}
+
+func TestBackgroundUploadServeAndClear(t *testing.T) {
+	a, err := newApp("long-private-password", filepath.Join(t.TempDir(), "navigation.json"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sendJSON := func(path, method string, body any, cookie *http.Cookie) *httptest.ResponseRecorder {
+		t.Helper()
+		var buf bytes.Buffer
+		if body != nil {
+			if err := json.NewEncoder(&buf).Encode(body); err != nil {
+				t.Fatal(err)
+			}
+		}
+		r := httptest.NewRequest(method, path, &buf)
+		if cookie != nil {
+			r.AddCookie(cookie)
+		}
+		if body != nil {
+			r.Header.Set("Content-Type", "application/json")
+		}
+		if method != http.MethodGet && method != http.MethodHead {
+			r.Header.Set("X-Nav-Request", "1")
+		}
+		w := httptest.NewRecorder()
+		a.ServeHTTP(w, r)
+		return w
+	}
+	login := sendJSON("/api/login", "POST", map[string]any{"password": "long-private-password"}, nil)
+	if login.Code != 200 {
+		t.Fatal(login.Body.String())
+	}
+	cookie := login.Result().Cookies()[0]
+	if r := sendJSON("/api/edit/unlock", "POST", map[string]any{"password": "long-private-password"}, cookie); r.Code != 200 {
+		t.Fatal(r.Body.String())
+	}
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("background", "bg.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write([]byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0}); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	uploadReq := httptest.NewRequest("POST", "/api/background", &body)
+	uploadReq.AddCookie(cookie)
+	uploadReq.Header.Set("Content-Type", writer.FormDataContentType())
+	uploadReq.Header.Set("X-Nav-Request", "1")
+	upload := httptest.NewRecorder()
+	a.ServeHTTP(upload, uploadReq)
+	if upload.Code != 200 {
+		t.Fatalf("upload failed: %d %s", upload.Code, upload.Body.String())
+	}
+	var uploadOut struct {
+		BackgroundImage string `json:"backgroundImage"`
+	}
+	if err := json.Unmarshal(upload.Body.Bytes(), &uploadOut); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(uploadOut.BackgroundImage, "/media/background?v=") {
+		t.Fatalf("invalid background URL: %q", uploadOut.BackgroundImage)
+	}
+	anonMedia := httptest.NewRecorder()
+	a.ServeHTTP(anonMedia, httptest.NewRequest("GET", "/media/background", nil))
+	if anonMedia.Code != 404 {
+		t.Fatalf("anonymous background access code: %d", anonMedia.Code)
+	}
+	mediaReq := httptest.NewRequest("GET", "/media/background", nil)
+	mediaReq.AddCookie(cookie)
+	media := httptest.NewRecorder()
+	a.ServeHTTP(media, mediaReq)
+	if media.Code != 200 || media.Header().Get("Content-Type") != "image/png" {
+		t.Fatalf("background not served: %d %q", media.Code, media.Header().Get("Content-Type"))
+	}
+	clear := sendJSON("/api/background", "DELETE", nil, cookie)
+	if clear.Code != 200 {
+		t.Fatalf("clear failed: %d %s", clear.Code, clear.Body.String())
+	}
+	data := sendJSON("/api/data", "GET", nil, cookie)
+	if !strings.Contains(data.Body.String(), `"backgroundImage":""`) {
+		t.Fatalf("background was not cleared: %s", data.Body.String())
 	}
 }
 

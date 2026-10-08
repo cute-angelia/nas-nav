@@ -39,12 +39,14 @@ type Category struct {
 	Links []Link `json:"links"`
 }
 type Navigation struct {
-	Version    int        `json:"version"`
-	Categories []Category `json:"categories"`
+	Version         int        `json:"version"`
+	BackgroundImage string     `json:"backgroundImage,omitempty"`
+	Categories      []Category `json:"categories"`
 }
 type SaveRequest struct {
-	Revision   string     `json:"revision"`
-	Categories []Category `json:"categories"`
+	Revision        string     `json:"revision"`
+	BackgroundImage string     `json:"backgroundImage,omitempty"`
+	Categories      []Category `json:"categories"`
 }
 type Session struct {
 	Expires   time.Time
@@ -128,6 +130,10 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Frame-Options", "DENY")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
+	if r.URL.Path == "/media/background" {
+		a.serveBackground(w, r)
+		return
+	}
 	if strings.HasPrefix(r.URL.Path, "/api/") {
 		a.api(w, r)
 		return
@@ -159,13 +165,20 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if method == "POST" {
-		if r.Header.Get("Content-Type") != "application/json" || r.Header.Get("X-Nav-Request") != "1" || !sameOrigin(r) {
+		contentType := r.Header.Get("Content-Type")
+		if (!strings.HasPrefix(contentType, "multipart/form-data") && contentType != "application/json") || r.Header.Get("X-Nav-Request") != "1" || !sameOrigin(r) {
 			writeJSON(w, 403, map[string]any{"error": "请求未通过验证"})
 			return
 		}
 	}
 	if method == "PUT" {
 		if r.Header.Get("Content-Type") != "application/json" || r.Header.Get("X-Nav-Request") != "1" || !sameOrigin(r) {
+			writeJSON(w, 403, map[string]any{"error": "请求未通过验证"})
+			return
+		}
+	}
+	if method == "DELETE" {
+		if r.Header.Get("X-Nav-Request") != "1" || !sameOrigin(r) {
 			writeJSON(w, 403, map[string]any{"error": "请求未通过验证"})
 			return
 		}
@@ -257,7 +270,39 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, 500, map[string]any{"error": "无法读取导航数据"})
 			return
 		}
-		writeJSON(w, 200, map[string]any{"version": 1, "categories": data.Categories, "revision": rev})
+		writeJSON(w, 200, map[string]any{"version": 1, "backgroundImage": data.BackgroundImage, "categories": data.Categories, "revision": rev})
+		return
+	}
+	if method == "POST" && path == "/api/background" {
+		a.mu.Lock()
+		allowed := time.Now().Before(s.EditUntil)
+		a.mu.Unlock()
+		if !allowed {
+			writeJSON(w, 403, map[string]any{"error": "编辑已锁定，请重新解锁"})
+			return
+		}
+		bg, revision, err := a.saveBackground(r)
+		if err != nil {
+			writeJSON(w, 400, map[string]any{"error": err.Error()})
+			return
+		}
+		writeJSON(w, 200, map[string]any{"ok": true, "backgroundImage": bg, "revision": revision})
+		return
+	}
+	if method == "DELETE" && path == "/api/background" {
+		a.mu.Lock()
+		allowed := time.Now().Before(s.EditUntil)
+		a.mu.Unlock()
+		if !allowed {
+			writeJSON(w, 403, map[string]any{"error": "编辑已锁定，请重新解锁"})
+			return
+		}
+		revision, err := a.clearBackground()
+		if err != nil {
+			writeJSON(w, 500, map[string]any{"error": "背景清除失败"})
+			return
+		}
+		writeJSON(w, 200, map[string]any{"ok": true, "backgroundImage": "", "revision": revision})
 		return
 	}
 	if method == "PUT" && path == "/api/data" {
@@ -273,7 +318,7 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, 400, map[string]any{"error": err.Error()})
 			return
 		}
-		data := Navigation{Version: 1, Categories: input.Categories}
+		data := Navigation{Version: 1, BackgroundImage: input.BackgroundImage, Categories: input.Categories}
 		if err := validate(data); err != nil {
 			writeJSON(w, 400, map[string]any{"error": err.Error()})
 			return
@@ -437,6 +482,124 @@ func (a *App) writeData(data Navigation) error {
 	return os.Rename(f.Name(), a.file)
 }
 
+func (a *App) serveBackground(w http.ResponseWriter, r *http.Request) {
+	a.mu.Lock()
+	s := a.session(r)
+	a.mu.Unlock()
+	if s == nil {
+		http.NotFound(w, r)
+		return
+	}
+	file, contentType, err := a.backgroundFile()
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+	http.ServeFile(w, r, file)
+}
+
+func (a *App) saveBackground(r *http.Request) (string, string, error) {
+	r.Body = http.MaxBytesReader(nil, r.Body, 6<<20)
+	if err := r.ParseMultipartForm(6 << 20); err != nil {
+		return "", "", fmt.Errorf("背景图片最大 5MB")
+	}
+	file, _, err := r.FormFile("background")
+	if err != nil {
+		return "", "", fmt.Errorf("请选择背景图片")
+	}
+	defer file.Close()
+	b, err := io.ReadAll(io.LimitReader(file, 5<<20+1))
+	if err != nil {
+		return "", "", fmt.Errorf("背景图片读取失败")
+	}
+	if len(b) == 0 || len(b) > 5<<20 {
+		return "", "", fmt.Errorf("背景图片最大 5MB")
+	}
+	contentType := http.DetectContentType(b)
+	ext := map[string]string{
+		"image/jpeg": ".jpg",
+		"image/png":  ".png",
+		"image/gif":  ".gif",
+		"image/webp": ".webp",
+	}[contentType]
+	if ext == "" {
+		return "", "", fmt.Errorf("只支持 JPG、PNG、GIF 或 WebP 图片")
+	}
+	dir := filepath.Dir(a.file)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return "", "", fmt.Errorf("保存目录不可写")
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if err := a.removeBackgroundFiles(); err != nil {
+		return "", "", fmt.Errorf("旧背景清理失败")
+	}
+	path := filepath.Join(dir, "background"+ext)
+	if err := os.WriteFile(path, b, 0600); err != nil {
+		return "", "", fmt.Errorf("背景图片保存失败")
+	}
+	data, _, err := a.load()
+	if err != nil {
+		return "", "", fmt.Errorf("导航数据读取失败")
+	}
+	hash := digest(string(b))[:12]
+	data.BackgroundImage = "/media/background?v=" + hash
+	if err := a.writeData(data); err != nil {
+		return "", "", fmt.Errorf("导航数据保存失败")
+	}
+	_, revision, err := a.load()
+	if err != nil {
+		return "", "", fmt.Errorf("导航数据读取失败")
+	}
+	return data.BackgroundImage, revision, nil
+}
+
+func (a *App) clearBackground() (string, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if err := a.removeBackgroundFiles(); err != nil {
+		return "", err
+	}
+	data, _, err := a.load()
+	if err != nil {
+		return "", err
+	}
+	data.BackgroundImage = ""
+	if err := a.writeData(data); err != nil {
+		return "", err
+	}
+	_, revision, err := a.load()
+	return revision, err
+}
+
+func (a *App) removeBackgroundFiles() error {
+	matches, err := filepath.Glob(filepath.Join(filepath.Dir(a.file), "background.*"))
+	if err != nil {
+		return err
+	}
+	for _, match := range matches {
+		if err := os.Remove(match); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
+}
+
+func (a *App) backgroundFile() (string, string, error) {
+	matches, err := filepath.Glob(filepath.Join(filepath.Dir(a.file), "background.*"))
+	if err != nil || len(matches) == 0 {
+		return "", "", fmt.Errorf("背景不存在")
+	}
+	ext := strings.ToLower(filepath.Ext(matches[0]))
+	contentType := map[string]string{".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".gif": "image/gif", ".webp": "image/webp"}[ext]
+	if contentType == "" {
+		return "", "", fmt.Errorf("背景格式无效")
+	}
+	return matches[0], contentType, nil
+}
+
 // addressKey uses host (including its effective port) and URL path as the
 // duplicate identity. Query strings and fragments are intentionally ignored.
 // Default http/https ports are treated the same as explicitly written ports.
@@ -467,6 +630,9 @@ func addressKey(u *url.URL) (string, error) {
 func validate(v Navigation) error {
 	if len(v.Categories) > 40 {
 		return fmt.Errorf("分类最多 40 个")
+	}
+	if v.BackgroundImage != "" && !strings.HasPrefix(v.BackgroundImage, "/media/background?v=") {
+		return fmt.Errorf("背景图片地址无效")
 	}
 	ids := make(map[string]bool)
 	addresses := make(map[string]string)
