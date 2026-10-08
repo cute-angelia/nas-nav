@@ -61,7 +61,8 @@
     data() {
       return {
         loading: true, loggedIn: false, editing: false, busy: false,
-        password: '', error: '', modalError: '',
+        password: '', rememberPassword: true, error: '', modalError: '',
+        batchSelecting: false, selectedLinkIds: [],
         categories: [], backgroundImage: '', revision: '', search: '',
         faviconErrors: {},
         modal: '', form: { id: '', catId: '', name: '', url: '', icon: '', description: '' },
@@ -111,6 +112,16 @@
     async mounted() {
       document.addEventListener('keydown', this.onKey);
       try {
+        const savedRemember = localStorage.getItem('nav_remember_pwd');
+        if (savedRemember !== null) {
+          this.rememberPassword = savedRemember === '1';
+        }
+        const savedPwd = localStorage.getItem('nav_saved_pwd');
+        if (savedPwd && this.rememberPassword) {
+          this.password = savedPwd;
+        }
+      } catch (_) {}
+      try {
         const s = await request('/api/me');
         this.loggedIn = s.loggedIn;
         if (s.loggedIn) await this.loadData();
@@ -137,9 +148,30 @@
       },
       async login() {
         this.error = ''; this.busy = true;
+        const currentPassword = this.password;
         try {
-          await request('/api/login', 'POST', { password: this.password });
-          this.password = '';
+          await request('/api/login', 'POST', { password: currentPassword });
+          if (this.rememberPassword) {
+            try {
+              localStorage.setItem('nav_saved_pwd', currentPassword);
+              localStorage.setItem('nav_remember_pwd', '1');
+            } catch (_) {}
+          } else {
+            try {
+              localStorage.removeItem('nav_saved_pwd');
+              localStorage.setItem('nav_remember_pwd', '0');
+            } catch (_) {}
+          }
+          if (window.PasswordCredential && navigator.credentials && navigator.credentials.store) {
+            try {
+              const cred = new window.PasswordCredential({
+                id: 'admin',
+                password: currentPassword,
+                name: '我的导航'
+              });
+              navigator.credentials.store(cred).catch(() => {});
+            } catch (_) {}
+          }
           this.loggedIn = true;
           this.editing = false;
           await this.loadData();
@@ -149,12 +181,23 @@
       async lockPage() {
         this.clearPointer();
         try { await request('/api/logout', 'POST', {}); } catch (_) { /* session is cleared in UI */ }
-        this.loggedIn = false; this.editing = false; this.password = '';
+        this.loggedIn = false; this.editing = false;
+        this.batchSelecting = false; this.selectedLinkIds = [];
+        this.password = '';
+        try {
+          localStorage.removeItem('nav_saved_pwd');
+        } catch (_) {}
         this.search = ''; this.categories = []; this.backgroundImage = ''; this.revision = '';
+        this.$nextTick(() => {
+          const el = document.getElementById('login-password');
+          if (el) el.value = '';
+        });
       },
       async toggleEditing() {
         if (this.editing) {
           this.clearPointer();
+          this.batchSelecting = false;
+          this.selectedLinkIds = [];
           try {
             await saveQueue;
             this.editing = false;
@@ -163,6 +206,66 @@
         } else {
           this.editing = true;
         }
+      },
+      toggleBatchSelectMode() {
+        if (!this.editing) return;
+        this.batchSelecting = !this.batchSelecting;
+        this.selectedLinkIds = [];
+      },
+      toggleLinkSelect(linkId) {
+        const idx = this.selectedLinkIds.indexOf(linkId);
+        if (idx > -1) {
+          this.selectedLinkIds.splice(idx, 1);
+        } else {
+          this.selectedLinkIds.push(linkId);
+        }
+      },
+      isLinkSelected(linkId) {
+        return this.selectedLinkIds.includes(linkId);
+      },
+      selectAllLinks() {
+        const allIds = [];
+        for (const cat of this.filteredCategories) {
+          for (const l of cat.links) {
+            allIds.push(l.id);
+          }
+        }
+        this.selectedLinkIds = allIds;
+      },
+      clearSelectedLinks() {
+        this.selectedLinkIds = [];
+      },
+      toggleCategorySelect(catId) {
+        const cat = this.categories.find(c => c.id === catId);
+        if (!cat || !cat.links.length) return;
+        const catLinkIds = cat.links.map(l => l.id);
+        const selectedSet = new Set(this.selectedLinkIds);
+        const allSelected = catLinkIds.every(id => selectedSet.has(id));
+        if (allSelected) {
+          this.selectedLinkIds = this.selectedLinkIds.filter(id => !catLinkIds.includes(id));
+        } else {
+          for (const id of catLinkIds) {
+            selectedSet.add(id);
+          }
+          this.selectedLinkIds = Array.from(selectedSet);
+        }
+      },
+      isCategoryAllSelected(catId) {
+        const cat = this.categories.find(c => c.id === catId);
+        if (!cat || !cat.links.length) return false;
+        const selectedSet = new Set(this.selectedLinkIds);
+        return cat.links.every(l => selectedSet.has(l.id));
+      },
+      async deleteSelectedLinks() {
+        if (!this.selectedLinkIds.length) return;
+        const selectedSet = new Set(this.selectedLinkIds);
+        const count = selectedSet.size;
+        for (const cat of this.categories) {
+          cat.links = cat.links.filter(l => !selectedSet.has(l.id));
+        }
+        this.selectedLinkIds = [];
+        await this.persist();
+        this.notify(`已删除 ${count} 个网站`);
       },
       closeModal() { if (this.busy) return; this.modal = ''; this.modalError = ''; },
       focusModal() { this.$nextTick(() => { if (this.$refs.modalInput) this.$refs.modalInput.focus(); }); },

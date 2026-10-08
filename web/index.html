@@ -16,13 +16,25 @@
   <div v-if="loading" class="app-loading">正在加载…</div>
 
   <main v-else-if="!loggedIn" class="login-page">
-    <form class="login-card" @submit.prevent="login">
+    <form class="login-card" action="/api/login" method="post" @submit.prevent="login">
       <div class="login-mark">N</div>
       <p class="login-kicker">NAS NAV LITE</p>
       <h1>我的导航</h1>
       <p>输入密码，查看私人收藏。</p>
+
+      <!-- 隐藏用户名输入框，帮助 Chrome / Safari 密码管理器自动捕获凭据 -->
+      <input type="text" name="username" value="admin" autocomplete="username" style="display:none" tabindex="-1" aria-hidden="true">
+
       <label class="field-label" for="login-password">访问密码</label>
-      <input id="login-password" v-model="password" type="password" autocomplete="current-password" placeholder="请输入访问密码" required autofocus>
+      <input id="login-password" name="password" ref="loginPasswordInput" v-model="password" type="password" autocomplete="current-password" placeholder="请输入访问密码" required autofocus>
+
+      <div class="login-options">
+        <label class="remember-checkbox">
+          <input type="checkbox" v-model="rememberPassword">
+          <span>记住密码</span>
+        </label>
+      </div>
+
       <p v-if="error" class="form-error">{{ error }}</p>
       <button class="primary block" type="submit" :disabled="busy">{{ busy ? '解锁中…' : '解锁进入' }}</button>
     </form>
@@ -54,15 +66,28 @@
       <template v-if="filteredCategories.length">
         <section v-for="category in filteredCategories" :key="category.id" class="section" :data-category-id="category.id">
           <div class="section-title">
-            <button v-if="editing && !search" class="grip category-grip" type="button" title="拖动分类排序" aria-label="拖动分类排序" @pointerdown="startPointer($event,'category',category.id)">⠿</button>
+            <button v-if="editing && !batchSelecting && !search" class="grip category-grip" type="button" title="拖动分类排序" aria-label="拖动分类排序" @pointerdown="startPointer($event,'category',category.id)">⠿</button>
             <h2>{{ category.name }}</h2>
-            <button v-if="editing" class="section-action" type="button" @click="openCategoryForm(category)" title="编辑分类">编辑</button>
-            <button v-if="editing" class="section-action plus-action" type="button" @click="openLinkForm(category.id)" title="添加网址">＋ 添加</button>
+            <button v-if="batchSelecting && category.links.length" class="section-action batch-cat-action" type="button" @click="toggleCategorySelect(category.id)">
+              {{ isCategoryAllSelected(category.id) ? '取消全选本组' : '全选本组' }}
+            </button>
+            <template v-else-if="editing && !batchSelecting">
+              <button class="section-action" type="button" @click="openCategoryForm(category)" title="编辑分类">编辑</button>
+              <button class="section-action plus-action" type="button" @click="openLinkForm(category.id)" title="添加网址">＋ 添加</button>
+            </template>
           </div>
           <div class="link-grid" :data-cat-id="category.id">
-            <div v-for="link in category.links" :key="link.id" class="link-tile" :data-link-id="link.id" :data-cat-id="category.id" :class="{'is-editing':editing}">
-              <button v-if="editing && !search" class="grip link-grip" type="button" title="拖动排序" aria-label="拖动排序" @pointerdown="startPointer($event,'link',category.id,link.id)">⠿</button>
-              <button v-if="editing" class="tile-link tile-edit" type="button" @click="openLinkForm(category.id,link)" :title="link.url + ' · 点击编辑'">
+            <div v-for="link in category.links" :key="link.id" class="link-tile" :data-link-id="link.id" :data-cat-id="category.id" :class="{'is-editing': editing, 'is-selecting': batchSelecting, 'is-selected': isLinkSelected(link.id)}" @click="batchSelecting ? toggleLinkSelect(link.id) : null">
+              <!-- 多选模式下的复选框 -->
+              <div v-if="batchSelecting" class="tile-checkbox" :class="{'checked': isLinkSelected(link.id)}" aria-hidden="true">
+                <svg v-if="isLinkSelected(link.id)" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+              </div>
+              <button v-if="editing && !batchSelecting && !search" class="grip link-grip" type="button" title="拖动排序" aria-label="拖动排序" @pointerdown="startPointer($event,'link',category.id,link.id)">⠿</button>
+              <div v-if="batchSelecting" class="tile-link tile-selectable">
+                <span class="favicon"><img v-if="!faviconErrors[link.id]" :src="faviconUrl(link.url)" alt="" loading="lazy" referrerpolicy="no-referrer" @error="faviconErrors[link.id]=true"><span v-else>{{ link.icon || link.name.slice(0,1) }}</span></span>
+                <span class="tile-name">{{ link.name }}</span>
+              </div>
+              <button v-else-if="editing" class="tile-link tile-edit" type="button" @click="openLinkForm(category.id,link)" :title="link.url + ' · 点击编辑'">
                 <span class="favicon"><img v-if="!faviconErrors[link.id]" :src="faviconUrl(link.url)" alt="" loading="lazy" referrerpolicy="no-referrer" @error="faviconErrors[link.id]=true"><span v-else>{{ link.icon || link.name.slice(0,1) }}</span></span>
                 <span class="tile-name">{{ link.name }}</span>
                 <span class="tile-badge-edit">编辑</span>
@@ -73,11 +98,11 @@
                 <svg class="tile-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M7 7h10v10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
               </a>
             </div>
-            <button v-if="editing && !search" type="button" class="add-link-tile" @click="openLinkForm(category.id)"><span>＋</span><span>添加网址</span></button>
+            <button v-if="editing && !batchSelecting && !search" type="button" class="add-link-tile" @click="openLinkForm(category.id)"><span>＋</span><span>添加网址</span></button>
             <div v-else-if="!category.links.length && !search" class="category-empty">暂无网址</div>
           </div>
         </section>
-        <div v-if="editing && !search" class="add-category-section">
+        <div v-if="editing && !batchSelecting && !search" class="add-category-section">
           <button type="button" class="add-category-card" @click="openCategoryForm()">
             <span class="plus-icon">＋</span>
             <span>新建分类</span>
@@ -91,8 +116,30 @@
     </div>
 
     <!-- 悬浮操作栏（Floating Dock） -->
-    <aside class="floating-dock" :class="{'is-editing': editing}" aria-label="管理操作">
-      <template v-if="editing">
+    <aside class="floating-dock" :class="{'is-editing': editing, 'is-batch': batchSelecting}" aria-label="管理操作">
+      <template v-if="batchSelecting">
+        <div class="dock-group dock-batch-group">
+          <span class="dock-batch-status">已选 <strong>{{ selectedLinkIds.length }}</strong> 项</span>
+          <button class="dock-btn" type="button" @click="selectAllLinks" title="全选所有分类网站">
+            <svg class="dock-icon" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+            <span>全选</span>
+          </button>
+          <button class="dock-btn" type="button" :disabled="!selectedLinkIds.length" @click="clearSelectedLinks" title="清空已选">
+            <svg class="dock-icon" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+            <span>清空</span>
+          </button>
+          <button class="dock-btn dock-btn-danger" type="button" :disabled="!selectedLinkIds.length" @click="deleteSelectedLinks" :title="'删除选中的 ' + selectedLinkIds.length + ' 个网站'">
+            <svg class="dock-icon" viewBox="0 0 24 24"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+            <span>删除{{ selectedLinkIds.length ? (' (' + selectedLinkIds.length + ')') : '' }}</span>
+          </button>
+        </div>
+        <div class="dock-divider"></div>
+        <button class="dock-btn dock-btn-primary" type="button" @click="toggleBatchSelectMode" title="完成多选管理">
+          <svg class="dock-icon" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+          <span>完成</span>
+        </button>
+      </template>
+      <template v-else-if="editing">
         <div class="dock-group">
           <button class="dock-btn" type="button" @click="openCategoryForm()" title="新建分类">
             <svg class="dock-icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
@@ -118,6 +165,10 @@
           <button class="dock-btn" type="button" @click="openBatchModal()" title="批量粘贴导入 Chrome 书签">
             <svg class="dock-icon" viewBox="0 0 24 24"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1" stroke="currentColor" stroke-width="2" fill="none"/><path d="M9 12h6M9 16h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
             <span>粘贴导入</span>
+          </button>
+          <button class="dock-btn" type="button" @click="toggleBatchSelectMode()" title="批量多选删除网站">
+            <svg class="dock-icon" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+            <span>多选删除</span>
           </button>
         </div>
         <div class="dock-divider"></div>
