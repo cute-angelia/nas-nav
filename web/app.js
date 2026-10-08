@@ -386,7 +386,6 @@
       async deleteItem() {
         const form = clone(this.form), type = this.modal;
         const name = form.name;
-        if (!window.confirm(type === 'category' ? `删除分类「${name}」及其中全部网址？` : `删除网址「${name}」？`)) return;
         if (type === 'category') {
           this.categories = this.categories.filter(c => c.id !== form.id);
         } else {
@@ -395,6 +394,7 @@
         }
         this.modal = '';
         await this.persist();
+        this.notify(type === 'category' ? `已删除分类「${name}」` : `已删除网址「${name}」`);
       },
       persist() {
         const snapshot = clone(this.categories);
