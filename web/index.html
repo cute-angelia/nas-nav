@@ -67,7 +67,13 @@
         <section v-for="category in filteredCategories" :key="category.id" class="section" :data-category-id="category.id">
           <div class="section-title">
             <button v-if="editing && !batchSelecting && !search" class="grip category-grip" type="button" title="拖动分类排序" aria-label="拖动分类排序" @pointerdown="startPointer($event,'category',category.id)">⠿</button>
-            <h2>{{ category.name }}</h2>
+            <h2 class="category-title-btn" @click="toggleCategoryCollapse(category.id)" :title="isCategoryCollapsed(category.id) ? '点击展开本组' : '点击折叠本组'">
+              <span>{{ category.name }}</span>
+              <span class="category-count" :title="category.links.length + ' 个网站'">{{ category.links.length }}</span>
+              <svg class="category-collapse-arrow" :class="{'is-collapsed': isCategoryCollapsed(category.id)}" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="m6 9 6 6 6-6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+              </svg>
+            </h2>
             <button v-if="batchSelecting && category.links.length" class="section-action batch-cat-action" type="button" @click="toggleCategorySelect(category.id)">
               {{ isCategoryAllSelected(category.id) ? '取消全选本组' : '全选本组' }}
             </button>
@@ -76,7 +82,7 @@
               <button class="section-action plus-action" type="button" @click="openLinkForm(category.id)" title="添加网址">＋ 添加</button>
             </template>
           </div>
-          <div class="link-grid" :data-cat-id="category.id">
+          <div v-show="!isCategoryCollapsed(category.id)" class="link-grid" :data-cat-id="category.id">
             <div v-for="link in category.links" :key="link.id" class="link-tile" :data-link-id="link.id" :data-cat-id="category.id" :class="{'is-editing': editing, 'is-selecting': batchSelecting, 'is-selected': isLinkSelected(link.id)}" @click="batchSelecting ? toggleLinkSelect(link.id) : null">
               <!-- 多选模式下的复选框 -->
               <div v-if="batchSelecting" class="tile-checkbox" :class="{'checked': isLinkSelected(link.id)}" aria-hidden="true">

@@ -63,6 +63,7 @@
         loading: true, loggedIn: false, editing: false, busy: false,
         password: '', rememberPassword: true, error: '', modalError: '',
         batchSelecting: false, selectedLinkIds: [],
+        collapsedCategoryIds: [],
         categories: [], backgroundImage: '', revision: '', search: '',
         faviconErrors: {},
         modal: '', form: { id: '', catId: '', name: '', url: '', icon: '', description: '' },
@@ -119,6 +120,10 @@
         const savedPwd = localStorage.getItem('nav_saved_pwd');
         if (savedPwd && this.rememberPassword) {
           this.password = savedPwd;
+        }
+        const savedCollapsed = localStorage.getItem('nav_collapsed_cats');
+        if (savedCollapsed) {
+          this.collapsedCategoryIds = JSON.parse(savedCollapsed) || [];
         }
       } catch (_) {}
       try {
@@ -266,6 +271,21 @@
         this.selectedLinkIds = [];
         await this.persist();
         this.notify(`已删除 ${count} 个网站`);
+      },
+      toggleCategoryCollapse(catId) {
+        const idx = this.collapsedCategoryIds.indexOf(catId);
+        if (idx > -1) {
+          this.collapsedCategoryIds.splice(idx, 1);
+        } else {
+          this.collapsedCategoryIds.push(catId);
+        }
+        try {
+          localStorage.setItem('nav_collapsed_cats', JSON.stringify(this.collapsedCategoryIds));
+        } catch (_) {}
+      },
+      isCategoryCollapsed(catId) {
+        if (this.search.trim()) return false;
+        return this.collapsedCategoryIds.includes(catId);
       },
       closeModal() { if (this.busy) return; this.modal = ''; this.modalError = ''; },
       focusModal() { this.$nextTick(() => { if (this.$refs.modalInput) this.$refs.modalInput.focus(); }); },
