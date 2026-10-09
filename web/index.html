@@ -215,21 +215,41 @@
     </aside>
   </div>
 
-  <div v-if="modal" class="modal-mask" @click.self="closeModal">
+  <div v-if="modal" class="modal-mask">
     <form class="modal" :class="{'modal-batch': modal==='batch'}" @submit.prevent="submitModal" role="dialog" aria-modal="true" :aria-label="modalTitle">
       <div class="modal-head"><h3>{{ modalTitle }}</h3><button class="icon-close" type="button" @click="closeModal" aria-label="关闭">×</button></div>
       <template v-if="modal==='category'">
         <label class="field-label" for="category-name">分类名称</label>
-        <input id="category-name" ref="modalInput" v-model.trim="form.name" maxlength="40" placeholder="例如：常用工具" required>
+        <input id="category-name" ref="modalInput" v-model.trim="form.name" maxlength="40" required>
       </template>
       <template v-else-if="modal==='link'">
         <label class="field-label" for="link-name">名称</label>
-        <input id="link-name" ref="modalInput" v-model.trim="form.name" maxlength="60" placeholder="例如：NAS 控制台" required>
+        <input id="link-name" ref="modalInput" v-model.trim="form.name" maxlength="60" required>
         <label class="field-label" for="link-url">网站地址</label>
-        <input id="link-url" v-model.trim="form.url" maxlength="2048" placeholder="https://example.com 或 http://192.168.1.1:5000" required spellcheck="false" aria-describedby="url-duplicate-hint">
+        <div class="modal-input-wrap">
+          <input id="link-url" v-model.trim="form.url" maxlength="2048" required spellcheck="false" aria-describedby="url-duplicate-hint">
+          <a
+            class="input-action-btn"
+            :class="{ 'is-disabled': !formJumpUrl }"
+            :href="formJumpUrl || 'javascript:void(0)'"
+            :target="formJumpUrl ? '_blank' : undefined"
+            rel="noopener noreferrer"
+            :title="formJumpUrl ? '在新标签页打开网址' : '请输入有效网址'"
+            :aria-label="formJumpUrl ? '在新标签页打开网址' : '请输入有效网址'"
+            :aria-disabled="!formJumpUrl"
+            :tabindex="formJumpUrl ? 0 : -1"
+            @click="onJumpUrlClick"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+              <polyline points="15 3 21 3 21 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+              <line x1="10" y1="14" x2="21" y2="3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </a>
+        </div>
         <p v-if="urlDuplicate" id="url-duplicate-hint" class="form-error">已存在于「{{ urlDuplicate.category }}」：{{ urlDuplicate.name }}（域名、端口和路径重复）</p>
         <label class="field-label" for="link-desc">描述 <span class="optional">（可选，小字展示在标题下方）</span></label>
-        <input id="link-desc" v-model.trim="form.description" maxlength="120" placeholder="" spellcheck="false">
+        <input id="link-desc" v-model.trim="form.description" maxlength="120" spellcheck="false">
       </template>
       <template v-else-if="modal==='batch'">
         <div class="batch-field-row">

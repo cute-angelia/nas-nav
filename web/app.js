@@ -109,6 +109,19 @@
         if (this.modal === 'link') return this.form.id ? '编辑网址' : '添加网址';
         if (this.modal === 'batch') return '批量粘贴导入书签';
         return '';
+      },
+      formJumpUrl() {
+        if (this.modal !== 'link') return '';
+        const raw = (this.form.url || '').trim();
+        if (!raw) return '';
+        try {
+          const norm = normalizedUrl(raw);
+          const parsed = new URL(norm);
+          if (['http:', 'https:'].includes(parsed.protocol) && parsed.hostname) {
+            return parsed.href;
+          }
+        } catch (_) {}
+        return '';
       }
     },
     async mounted() {
@@ -157,6 +170,11 @@
       faviconUrl(raw) {
         try { return new URL('/favicon.ico', raw).href; }
         catch (_) { return ''; }
+      },
+      onJumpUrlClick(e) {
+        if (!this.formJumpUrl) {
+          e.preventDefault();
+        }
       },
       async login() {
         this.error = ''; this.busy = true;
