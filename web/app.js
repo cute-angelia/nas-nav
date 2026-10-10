@@ -167,9 +167,23 @@
         clearTimeout(toastTimer);
         toastTimer = setTimeout(() => { this.toast = ''; }, 3300);
       },
-      faviconUrl(raw) {
-        try { return new URL('/favicon.ico', raw).href; }
+      faviconUrl(link) {
+        if (!link) return '';
+        if (typeof link === 'string') {
+          try { return new URL('/favicon.ico', link).href; } catch (_) { return ''; }
+        }
+        if (link.icon && /^https?:\/\//i.test(link.icon)) {
+          return link.icon;
+        }
+        try { return new URL('/favicon.ico', link.url).href; }
         catch (_) { return ''; }
+      },
+      fallbackIcon(link) {
+        if (!link) return '';
+        if (link.icon && !/^https?:\/\//i.test(link.icon)) {
+          return link.icon;
+        }
+        return (link.name || '').slice(0, 1);
       },
       onJumpUrlClick(e) {
         if (!this.formJumpUrl) {
@@ -494,6 +508,9 @@
               if (res && res.title && res.title.trim()) {
                 currentItem.name = res.title.trim().slice(0, 60);
               }
+              if (res && res.favicon) {
+                currentItem.favicon = res.favicon;
+              }
             } catch (_) {
             } finally {
               currentItem.fetching = false;
@@ -503,6 +520,59 @@
 
         const workers = Array.from({ length: Math.min(concurrency, queue.length) }, () => worker());
         await Promise.all(workers);
+      },
+      async asyncFetchLinkFavicon(linkId, targetUrl) {
+        try {
+          const res = await request('/api/fetch-favicon?url=' + encodeURIComponent(targetUrl));
+          if (res && res.favicon) {
+            let found = false;
+            for (const cat of this.categories) {
+              const link = cat.links.find(l => l.id === linkId);
+              if (link && link.url === targetUrl && link.icon !== res.favicon) {
+                link.icon = res.favicon;
+                found = true;
+                break;
+              }
+            }
+            if (found) {
+              delete this.faviconErrors[linkId];
+              await this.persist();
+            }
+          }
+        } catch (_) {}
+      },
+      async asyncFetchBatchFavicons(links) {
+        if (!links || !links.length) return;
+        const queue = [...links];
+        const concurrency = 4;
+        let modified = false;
+
+        const worker = async () => {
+          while (queue.length) {
+            const item = queue.shift();
+            if (!item) break;
+            try {
+              const res = await request('/api/fetch-favicon?url=' + encodeURIComponent(item.url));
+              if (res && res.favicon) {
+                for (const cat of this.categories) {
+                  const link = cat.links.find(l => l.id === item.id);
+                  if (link && link.url === item.url && link.icon !== res.favicon) {
+                    link.icon = res.favicon;
+                    delete this.faviconErrors[item.id];
+                    modified = true;
+                    break;
+                  }
+                }
+              }
+            } catch (_) {}
+          }
+        };
+
+        const workers = Array.from({ length: Math.min(concurrency, links.length) }, () => worker());
+        await Promise.all(workers);
+        if (modified) {
+          await this.persist();
+        }
       },
       async submitModal() {
         if (this.busy) return;
@@ -522,6 +592,7 @@
           }
 
           let addedCount = 0;
+          const newAddedLinks = [];
           for (const item of validItems) {
             const catName = item.categoryName.trim() || this.getDefaultCategoryName();
             let targetCat = this.categories.find(c => c.name.toLowerCase() === catName.toLowerCase());
@@ -529,13 +600,17 @@
               targetCat = { id: uid(), name: catName, links: [] };
               this.categories.push(targetCat);
             }
-            targetCat.links.push({
+            const newLink = {
               id: uid(),
               name: item.name,
               url: item.url,
-              icon: '',
+              icon: item.favicon || '',
               description: ''
-            });
+            };
+            targetCat.links.push(newLink);
+            if (!newLink.icon) {
+              newAddedLinks.push({ id: newLink.id, url: newLink.url });
+            }
             addedCount++;
           }
 
@@ -543,6 +618,10 @@
           this.modal = '';
           await this.persist();
           this.notify(`已成功导入 ${addedCount} 个网站${dupCount ? `，跳过 ${dupCount} 个重复项` : ''}`);
+
+          if (newAddedLinks.length) {
+            this.asyncFetchBatchFavicons(newAddedLinks);
+          }
           return;
         }
         const form = clone(this.form);
@@ -572,8 +651,11 @@
           }
           const cat = this.categories.find(c => c.id === form.catId);
           if (!cat) { this.modalError = '分类不存在'; return; }
+          const targetLinkId = form.id || uid();
+          const oldLink = form.id ? cat.links.find(l => l.id === form.id) : null;
+          const urlChanged = !oldLink || oldLink.url !== url;
           const value = {
-            id: form.id || uid(),
+            id: targetLinkId,
             name: form.name.trim(),
             url,
             icon: (form.icon || '').trim(),
@@ -583,6 +665,15 @@
             const index = cat.links.findIndex(l => l.id === form.id);
             if (index !== -1) cat.links.splice(index, 1, value);
           } else cat.links.push(value);
+
+          this.modal = '';
+          delete this.faviconErrors[targetLinkId];
+          await this.persist();
+
+          if (urlChanged || !value.icon) {
+            this.asyncFetchLinkFavicon(targetLinkId, url);
+          }
+          return;
         }
         this.modal = '';
         await this.persist();

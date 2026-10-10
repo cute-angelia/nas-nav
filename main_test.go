@@ -296,7 +296,7 @@ func TestAPIServerRejectsDuplicateSave(t *testing.T) {
 func TestFetchHTMLTitleAPI(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write([]byte(`<!DOCTYPE html><html><head><title>  测试网页标题 &amp; Example  </title></head><body><h1>Hello</h1></body></html>`))
+		w.Write([]byte(`<!DOCTYPE html><html><head><title>  测试网页标题 &amp; Example  </title><link rel="icon" href="/assets/fav.png"></head><body><h1>Hello</h1></body></html>`))
 	}))
 	defer ts.Close()
 
@@ -332,7 +332,7 @@ func TestFetchHTMLTitleAPI(t *testing.T) {
 		t.Fatalf("expected empty title, got %q", resEmpty["title"])
 	}
 
-	// 2. 有效 url，正确提取网页标题并解码 html 实体
+	// 2. 有效 url，正确提取网页标题与 favicon
 	reqValid := httptest.NewRequest("GET", "/api/fetch-title?url="+url.QueryEscape(ts.URL), nil)
 	reqValid.AddCookie(cookie)
 	wValid := httptest.NewRecorder()
@@ -347,6 +347,9 @@ func TestFetchHTMLTitleAPI(t *testing.T) {
 	if resValid["title"] != "测试网页标题 & Example" {
 		t.Fatalf("expected '测试网页标题 & Example', got %q", resValid["title"])
 	}
+	if resValid["favicon"] != ts.URL+"/assets/fav.png" {
+		t.Fatalf("expected favicon %q, got %q", ts.URL+"/assets/fav.png", resValid["favicon"])
+	}
 
 	// 3. 无效或无法访问的 url，静默返回空标题，不返回 400 或 500
 	reqBad := httptest.NewRequest("GET", "/api/fetch-title?url=http://127.0.0.1:54321/not-found", nil)
@@ -355,6 +358,22 @@ func TestFetchHTMLTitleAPI(t *testing.T) {
 	a.ServeHTTP(wBad, reqBad)
 	if wBad.Code != 200 {
 		t.Fatalf("bad url status %d != 200", wBad.Code)
+	}
+
+	// 4. 单独的 /api/fetch-favicon 接口
+	reqFav := httptest.NewRequest("GET", "/api/fetch-favicon?url="+url.QueryEscape(ts.URL), nil)
+	reqFav.AddCookie(cookie)
+	wFav := httptest.NewRecorder()
+	a.ServeHTTP(wFav, reqFav)
+	if wFav.Code != 200 {
+		t.Fatalf("fetch favicon status %d != 200", wFav.Code)
+	}
+	var resFav map[string]string
+	if err := json.Unmarshal(wFav.Body.Bytes(), &resFav); err != nil {
+		t.Fatal(err)
+	}
+	if resFav["favicon"] != ts.URL+"/assets/fav.png" {
+		t.Fatalf("expected favicon %q, got %q", ts.URL+"/assets/fav.png", resFav["favicon"])
 	}
 }
 

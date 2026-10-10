@@ -270,14 +270,24 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	if method == "GET" && path == "/api/fetch-favicon" {
+		targetURL := strings.TrimSpace(r.URL.Query().Get("url"))
+		if targetURL == "" {
+			writeJSON(w, 200, map[string]any{"url": "", "favicon": ""})
+			return
+		}
+		_, favicon := fetchPageMeta(targetURL)
+		writeJSON(w, 200, map[string]any{"url": targetURL, "favicon": favicon})
+		return
+	}
 	if method == "GET" && path == "/api/fetch-title" {
 		targetURL := strings.TrimSpace(r.URL.Query().Get("url"))
 		if targetURL == "" {
-			writeJSON(w, 200, map[string]any{"url": "", "title": ""})
+			writeJSON(w, 200, map[string]any{"url": "", "title": "", "favicon": ""})
 			return
 		}
-		title := fetchHTMLTitle(targetURL)
-		writeJSON(w, 200, map[string]any{"url": targetURL, "title": title})
+		title, favicon := fetchPageMeta(targetURL)
+		writeJSON(w, 200, map[string]any{"url": targetURL, "title": title, "favicon": favicon})
 		return
 	}
 	if method == "GET" && path == "/api/backup" {
@@ -856,7 +866,7 @@ func validate(v Navigation) error {
 			if count > 500 {
 				return fmt.Errorf("网址最多 500 个")
 			}
-			if !check(link.ID, 100) || ids[link.ID] || !check(link.Name, 60) || len([]rune(link.Icon)) > 8 || len([]rune(link.Description)) > 120 {
+			if !check(link.ID, 100) || ids[link.ID] || !check(link.Name, 60) || len(link.Icon) > 2048 || len([]rune(link.Description)) > 120 {
 				return fmt.Errorf("网址名称或 ID 无效")
 			}
 			ids[link.ID] = true
@@ -880,12 +890,100 @@ func validate(v Navigation) error {
 	return nil
 }
 
-var titleRegexp = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
+var (
+	titleRegexp    = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
+	linkTagRegexp  = regexp.MustCompile(`(?is)<link\s+[^>]*>`)
+	relAttrRegexp  = regexp.MustCompile(`(?i)\brel\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))`)
+	hrefAttrRegexp = regexp.MustCompile(`(?i)\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))`)
+	baseTagRegexp  = regexp.MustCompile(`(?is)<base\s+[^>]*href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))`)
+)
 
-func fetchHTMLTitle(rawURL string) string {
+func resolveURL(baseURL *url.URL, ref string) string {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return ""
+	}
+	if strings.HasPrefix(ref, "//") {
+		return baseURL.Scheme + ":" + ref
+	}
+	refURL, err := url.Parse(ref)
+	if err != nil {
+		return ""
+	}
+	resolved := baseURL.ResolveReference(refURL)
+	if resolved.Scheme != "http" && resolved.Scheme != "https" {
+		return ""
+	}
+	return resolved.String()
+}
+
+func extractFavicon(htmlContent string, baseURL *url.URL) string {
+	if m := baseTagRegexp.FindStringSubmatch(htmlContent); len(m) > 0 {
+		for i := 1; i <= 3; i++ {
+			if m[i] != "" {
+				if baseParsed, err := url.Parse(m[i]); err == nil {
+					baseURL = baseURL.ResolveReference(baseParsed)
+				}
+				break
+			}
+		}
+	}
+
+	tags := linkTagRegexp.FindAllString(htmlContent, -1)
+	var candidate string
+	for _, tag := range tags {
+		var rel string
+		if rm := relAttrRegexp.FindStringSubmatch(tag); len(rm) > 0 {
+			for i := 1; i <= 3; i++ {
+				if rm[i] != "" {
+					rel = strings.ToLower(strings.TrimSpace(rm[i]))
+					break
+				}
+			}
+		}
+		if !strings.Contains(rel, "icon") {
+			continue
+		}
+
+		var href string
+		if hm := hrefAttrRegexp.FindStringSubmatch(tag); len(hm) > 0 {
+			for i := 1; i <= 3; i++ {
+				if hm[i] != "" {
+					href = strings.TrimSpace(hm[i])
+					break
+				}
+			}
+		}
+		if href == "" {
+			continue
+		}
+
+		fullURL := resolveURL(baseURL, href)
+		if fullURL == "" {
+			continue
+		}
+
+		if rel == "icon" || strings.Contains(rel, "shortcut icon") {
+			return fullURL
+		}
+		if candidate == "" {
+			candidate = fullURL
+		}
+	}
+
+	if candidate != "" {
+		return candidate
+	}
+	if baseURL != nil && baseURL.Host != "" {
+		return baseURL.Scheme + "://" + baseURL.Host + "/favicon.ico"
+	}
+	return ""
+}
+
+func fetchPageMeta(rawURL string) (string, string) {
 	parsed, err := url.Parse(rawURL)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-		return ""
+		return "", ""
 	}
 
 	client := &http.Client{
@@ -900,7 +998,7 @@ func fetchHTMLTitle(rawURL string) string {
 
 	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
 	if err != nil {
-		return ""
+		return "", ""
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
@@ -908,28 +1006,40 @@ func fetchHTMLTitle(rawURL string) string {
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return ""
+		return "", ""
 	}
 	defer resp.Body.Close()
 
 	limitReader := io.LimitReader(resp.Body, 64*1024)
 	buf, err := io.ReadAll(limitReader)
 	if err != nil && !errors.Is(err, io.EOF) {
-		return ""
+		return "", ""
 	}
 
+	htmlContent := string(buf)
+	baseURL := resp.Request.URL
+	if baseURL == nil {
+		baseURL = parsed
+	}
+
+	var rawTitle string
 	matches := titleRegexp.FindSubmatch(buf)
-	if len(matches) < 2 {
-		return ""
+	if len(matches) >= 2 {
+		rawTitle = string(matches[1])
+		rawTitle = strings.TrimSpace(regexp.MustCompile(`\s+`).ReplaceAllString(rawTitle, " "))
+		rawTitle = html.UnescapeString(rawTitle)
+		runes := []rune(rawTitle)
+		if len(runes) > 60 {
+			rawTitle = string(runes[:60])
+		}
 	}
 
-	rawTitle := string(matches[1])
-	rawTitle = strings.TrimSpace(regexp.MustCompile(`\s+`).ReplaceAllString(rawTitle, " "))
-	rawTitle = html.UnescapeString(rawTitle)
-	runes := []rune(rawTitle)
-	if len(runes) > 60 {
-		rawTitle = string(runes[:60])
-	}
-	return rawTitle
+	favicon := extractFavicon(htmlContent, baseURL)
+	return rawTitle, favicon
+}
+
+func fetchHTMLTitle(rawURL string) string {
+	title, _ := fetchPageMeta(rawURL)
+	return title
 }
 

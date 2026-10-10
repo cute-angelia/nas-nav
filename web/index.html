@@ -104,14 +104,14 @@
               </div>
               <button v-if="editing && !batchSelecting && !search" class="grip link-grip" type="button" title="拖动排序" aria-label="拖动排序" @pointerdown="startPointer($event,'link',category.id,link.id)">⠿</button>
               <div v-if="batchSelecting" class="tile-link tile-selectable">
-                <span class="favicon"><img v-if="!faviconErrors[link.id]" :src="faviconUrl(link.url)" alt="" loading="lazy" referrerpolicy="no-referrer" @error="faviconErrors[link.id]=true"><span v-else>{{ link.icon || link.name.slice(0,1) }}</span></span>
+                <span class="favicon"><img v-if="!faviconErrors[link.id]" :src="faviconUrl(link)" alt="" loading="lazy" referrerpolicy="no-referrer" @error="faviconErrors[link.id]=true"><span v-else>{{ fallbackIcon(link) }}</span></span>
                 <div class="tile-info">
                   <span class="tile-name">{{ link.name }}</span>
                   <span v-if="link.description" class="tile-desc" :title="link.description">{{ link.description }}</span>
                 </div>
               </div>
               <button v-else-if="editing" class="tile-link tile-edit" type="button" @click="openLinkForm(category.id,link)" :title="link.url + ' · 点击编辑'">
-                <span class="favicon"><img v-if="!faviconErrors[link.id]" :src="faviconUrl(link.url)" alt="" loading="lazy" referrerpolicy="no-referrer" @error="faviconErrors[link.id]=true"><span v-else>{{ link.icon || link.name.slice(0,1) }}</span></span>
+                <span class="favicon"><img v-if="!faviconErrors[link.id]" :src="faviconUrl(link)" alt="" loading="lazy" referrerpolicy="no-referrer" @error="faviconErrors[link.id]=true"><span v-else>{{ fallbackIcon(link) }}</span></span>
                 <div class="tile-info">
                   <span class="tile-name">{{ link.name }}</span>
                   <span v-if="link.description" class="tile-desc" :title="link.description">{{ link.description }}</span>
@@ -119,7 +119,7 @@
                 <span class="tile-badge-edit">编辑</span>
               </button>
               <a v-else class="tile-link" :href="link.url" target="_blank" rel="noopener noreferrer" :title="link.url">
-                <span class="favicon"><img v-if="!faviconErrors[link.id]" :src="faviconUrl(link.url)" alt="" loading="lazy" referrerpolicy="no-referrer" @error="faviconErrors[link.id]=true"><span v-else>{{ link.icon || link.name.slice(0,1) }}</span></span>
+                <span class="favicon"><img v-if="!faviconErrors[link.id]" :src="faviconUrl(link)" alt="" loading="lazy" referrerpolicy="no-referrer" @error="faviconErrors[link.id]=true"><span v-else>{{ fallbackIcon(link) }}</span></span>
                 <div class="tile-info">
                   <span class="tile-name">{{ link.name }}</span>
                   <span v-if="link.description" class="tile-desc" :title="link.description">{{ link.description }}</span>
